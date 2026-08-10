@@ -1,0 +1,9 @@
+{
+  "name": "pili-dlna",
+  "version": "0.1.0",
+  "description": "PiliPlus native iOS DLNA SSDP discovery",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

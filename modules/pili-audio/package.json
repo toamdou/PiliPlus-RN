@@ -1,0 +1,9 @@
+{
+  "name": "pili-audio",
+  "version": "0.1.0",
+  "description": "PiliPlus native iOS audio session, Now Playing and remote command support",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

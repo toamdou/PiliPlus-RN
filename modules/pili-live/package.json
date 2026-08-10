@@ -1,0 +1,9 @@
+{
+  "name": "pili-live",
+  "version": "0.1.0",
+  "description": "PiliPlus native iOS live WebSocket transport",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

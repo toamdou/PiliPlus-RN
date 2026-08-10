@@ -1,0 +1,58 @@
+{
+  "expo": {
+    "name": "PiliPlus",
+    "slug": "piliplus",
+    "version": "1.0.0",
+    "platforms": ["ios"],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "piliplus",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.piliplus.app",
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "CADisableMinimumFrameDurationOnPhone": true,
+        "UIBackgroundModes": ["audio"],
+        "NSLocalNetworkUsageDescription": "允许 PiliPlus 发现同一局域网内的投屏设备并连接本地 WebDAV 服务",
+        "NSPhotoLibraryAddUsageDescription": "允许 PiliPlus 保存封面图片到相册"
+      },
+      "entitlements": {
+        "com.apple.developer.networking.multicast": true
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 76
+        }
+      ],
+      "expo-image",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "允许 PiliPlus 选择图片",
+          "cameraPermission": false,
+          "microphonePermission": false
+        }
+      ],
+      "pili-native-core",
+      "./plugins/with-rns-gamma"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

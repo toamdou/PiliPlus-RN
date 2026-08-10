@@ -1,0 +1,9 @@
+{
+  "name": "pili-player",
+  "version": "0.1.0",
+  "description": "PiliPlus native AVPlayer surface for iOS with RN overlay controls",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

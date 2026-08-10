@@ -1,0 +1,51 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+example
+
+# generated native folders
+/ios
+
+# 不推送的工作区内容（WIP 报告 / 助手与编辑器配置）
+reports/
+AUDIT-REPORT.md
+FINDINGS-CHECKLIST.md
+RN-AUDIT-PLAN.md
+SWIFT-NATIVE-AUDIT-REPORT.md
+CLAUDE.md
+.claude/
+.vscode/

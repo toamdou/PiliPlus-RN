@@ -1,0 +1,9 @@
+{
+  "name": "pili-danmaku",
+  "version": "0.1.0",
+  "description": "PiliPlus native iOS danmaku and subtitle rendering overlays",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

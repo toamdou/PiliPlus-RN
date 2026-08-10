@@ -1,0 +1,9 @@
+{
+  "name": "pili-video-enhance",
+  "version": "0.1.0",
+  "description": "PiliPlus native video enhancement for iOS (super resolution, frame interpolation, SDR to HDR)",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

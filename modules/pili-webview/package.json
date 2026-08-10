@@ -1,0 +1,9 @@
+{
+  "name": "pili-webview",
+  "version": "0.1.0",
+  "description": "PiliPlus native WKWebView surface for iOS with RN fallback",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}

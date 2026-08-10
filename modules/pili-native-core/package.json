@@ -1,0 +1,9 @@
+{
+  "name": "pili-native-core",
+  "version": "0.1.0",
+  "description": "PiliPlus native iOS core: signing, network/cookie, background task and image viewer",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "license": "UNLICENSED",
+  "private": true
+}
