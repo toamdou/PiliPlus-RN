@@ -9,14 +9,15 @@
  *  2.6 举报 / 播放信息统一 Alert.alert（替代 SwiftUI ConfirmationDialog / SwiftAlert）
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, Switch, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Slider } from '@expo/ui/swift-ui';
 import { NativeBottomSheet } from '@/components/NativeBottomSheet';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { copyText } from 'pili-native-core';
-import { ACCENT, useThemeColors } from '@/components/SwiftUIHost';
+import { useThemeColors, useAccent } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { useSettingsStore } from '@/stores/settings';
 import { showToast } from '@/utils/toast';
 import { formatPlayerTime } from '@/utils/player-utils';
@@ -85,6 +86,7 @@ export function PlayerSettingsSheet({
   playUrl = '', videoInfo, cid = 0, onSubtitleSelect, onSubtitleClose,
 }: Props) {
   const colors = useThemeColors();
+  const accent = useAccent();
   const T = useType();
   const s = useSettingsStore();
   const [section, setSection] = useState<Section>('main');
@@ -339,7 +341,7 @@ export function PlayerSettingsSheet({
                     <Press style={[styles.row, styles.rowBorder, { borderBottomColor: colors.separator }]}
                       onPress={() => setSection('sleep')}>
                       <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>定时关闭</Text>
-                      <Text style={[T.footnote, { color: sleepRemainMin > 0 ? ACCENT : colors.textTertiary }]}>
+                      <Text style={[T.footnote, { color: sleepRemainMin > 0 ? accent : colors.textTertiary }]}>
                         {sleepRemainMin > 0 ? `剩余${sleepRemainMin}分钟` : '未开启'}
                       </Text>
                       <Ionicons name="chevron-forward" size={14} color={colors.textTertiary} />
@@ -351,7 +353,7 @@ export function PlayerSettingsSheet({
                         {REPEAT_MODES.map((m) => (
                           <Press key={m.value} haptic scaleTo={0.9}
                             onPress={() => s.set({ playRepeat: m.value })}
-                            style={[styles.chip, { backgroundColor: s.playRepeat === m.value ? ACCENT : colors.fill2, ...continuous }]}>
+                            style={[styles.chip, { backgroundColor: s.playRepeat === m.value ? accent : colors.fill2, ...continuous }]}>
                             <Text style={[T.caption1, { color: s.playRepeat === m.value ? '#FFF' : colors.textSecondary }]}>{m.label}</Text>
                           </Press>
                         ))}
@@ -372,11 +374,10 @@ export function PlayerSettingsSheet({
                     {/* SponsorBlock */}
                     <View style={[styles.row, styles.rowBorder, { borderBottomColor: colors.separator }]}>
                       <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>SponsorBlock</Text>
-                      <Switch
+                      <IoSToggle
                         value={s.enableSponsorBlock}
                         onValueChange={(v) => s.set({ enableSponsorBlock: v })}
-                        trackColor={{ true: ACCENT, false: colors.fill2 }}
-                        thumbColor="#FFFFFF"
+                        trackColor={{ false: colors.fill2 }}
                         ios_backgroundColor={colors.fill2}
                       />
                     </View>
@@ -401,7 +402,7 @@ export function PlayerSettingsSheet({
                       {SPEEDS.map((sp) => (
                         <Press key={sp} haptic scaleTo={0.9}
                           onPress={() => { onSpeedChange(sp); setSection('main'); }}
-                          style={[styles.gridBtn, { backgroundColor: currentSpeed === sp ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.gridBtn, { backgroundColor: currentSpeed === sp ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.subhead, { color: currentSpeed === sp ? '#FFF' : colors.text, fontWeight: '600' }]}>{sp}x</Text>
                         </Press>
                       ))}
@@ -417,7 +418,7 @@ export function PlayerSettingsSheet({
                       {qualityList.map((q) => (
                         <Press key={q.quality} haptic scaleTo={0.9}
                           onPress={() => { onQualityChange?.(q.quality); setSection('main'); }}
-                          style={[styles.gridBtn, { backgroundColor: currentQn === q.quality ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.gridBtn, { backgroundColor: currentQn === q.quality ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.caption1, { color: currentQn === q.quality ? '#FFF' : colors.text }]} numberOfLines={1}>{q.new_description}</Text>
                         </Press>
                       ))}
@@ -431,21 +432,19 @@ export function PlayerSettingsSheet({
                     <BackHeader title="弹幕设置" colors={colors} T={T} onBack={() => setSection('main')} />
                     <View style={[styles.row, styles.rowBorder, { borderBottomColor: colors.separator }]}>
                       <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>弹幕开关</Text>
-                      <Switch
+                      <IoSToggle
                         value={s.danmakuEnabled}
                         onValueChange={(v) => s.set({ danmakuEnabled: v })}
-                        trackColor={{ true: ACCENT, false: colors.fill2 }}
-                        thumbColor="#FFFFFF"
+                        trackColor={{ false: colors.fill2 }}
                         ios_backgroundColor={colors.fill2}
                       />
                     </View>
                     <View style={[styles.row, styles.rowBorder, { borderBottomColor: colors.separator }]}>
                       <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>合并相似</Text>
-                      <Switch
+                      <IoSToggle
                         value={s.mergeDanmaku}
                         onValueChange={(v) => s.set({ mergeDanmaku: v })}
-                        trackColor={{ true: ACCENT, false: colors.fill2 }}
-                        thumbColor="#FFFFFF"
+                        trackColor={{ false: colors.fill2 }}
                         ios_backgroundColor={colors.fill2}
                       />
                     </View>
@@ -457,7 +456,45 @@ export function PlayerSettingsSheet({
                       format={(v) => `${v}s`} />
                     <ChipRow label="透明度" options={[20, 40, 60, 80, 100]} current={Math.round(s.danmakuOpacity * 100)}
                       onSelect={(v) => s.set({ danmakuOpacity: v / 100 })} colors={colors} T={T}
-                      format={(v) => `${v}%`} last />
+                      format={(v) => `${v}%`} />
+                    {/* 批次5 P1（02-2.3）：显示区域——原生按比例收敛轨道高度 */}
+                    <ChipRow label="显示区域" options={[25, 50, 75, 100]} current={Math.round(s.dmArea * 100)}
+                      onSelect={(v) => s.set({ dmArea: v / 100 })} colors={colors} T={T}
+                      format={(v) => `${v}%`} />
+                    {/* 批次5 P1：描边粗细——0=不描边（软阴影兜底） */}
+                    <ChipRow label="描边" options={[0, 0.5, 1, 1.5, 2, 3]} current={s.dmStrokeWidth}
+                      onSelect={(v) => s.set({ dmStrokeWidth: v })} colors={colors} T={T}
+                      format={(v) => (v === 0 ? '无' : `${v}`)} />
+                    {/* 批次5 P1：静态弹幕时长（顶部/底部停留秒数） */}
+                    <ChipRow label="静态时长" options={[2, 3, 4, 5, 6, 8]} current={s.dmStaticDuration}
+                      onSelect={(v) => s.set({ dmStaticDuration: v })} colors={colors} T={T}
+                      format={(v) => `${v}s`} />
+                    {/* 批次5 P1：按类型屏蔽（原生 spawn 阶段跳过被屏蔽类型） */}
+                    <View style={[styles.row, styles.rowBorder, { borderBottomColor: colors.separator }]}>
+                      <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>按类型屏蔽</Text>
+                      <View style={styles.chipRow}>
+                        {[
+                          { label: '滚动', value: 'dmBlockScroll' as const },
+                          { label: '顶部', value: 'dmBlockTop' as const },
+                          { label: '底部', value: 'dmBlockBottom' as const },
+                          { label: '彩色', value: 'dmBlockColorful' as const },
+                        ].map((opt) => {
+                          const active = s[opt.value];
+                          return (
+                            <Press key={opt.value} haptic scaleTo={0.9}
+                              onPress={() => s.set({ [opt.value]: !active } as any)}
+                              style={[styles.chip, { backgroundColor: active ? accent : colors.fill2, ...continuous }]}>
+                              <Text style={[T.caption1, { color: active ? '#FFF' : colors.textSecondary }]}>{opt.label}</Text>
+                            </Press>
+                          );
+                        })}
+                      </View>
+                    </View>
+                    {/* 批次5 P1：智能云屏蔽级别（API/解析器未暴露 weight 字段，暂不支持） */}
+                    <View style={[styles.row, { borderBottomColor: colors.separator, borderBottomWidth: StyleSheet.hairlineWidth }]}>
+                      <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>智能云屏蔽</Text>
+                      <Text style={[T.footnote, { color: colors.textTertiary }]}>暂不支持</Text>
+                    </View>
                   </View>
                 )}
 
@@ -469,7 +506,7 @@ export function PlayerSettingsSheet({
                       {CDN_OPTIONS.map((c) => (
                         <Press key={c.value} haptic scaleTo={0.9}
                           onPress={() => { handleCdnChange(c.value); setSection('main'); showToast(`CDN 已切换为 ${c.label}，正在重载`); }}
-                          style={[styles.gridBtn, { backgroundColor: s.cdnService === c.value ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.gridBtn, { backgroundColor: s.cdnService === c.value ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.subhead, { color: s.cdnService === c.value ? '#FFF' : colors.text }]}>{c.label}</Text>
                         </Press>
                       ))}
@@ -489,7 +526,7 @@ export function PlayerSettingsSheet({
                       ].map((c) => (
                         <Press key={c.value} haptic scaleTo={0.9}
                           onPress={() => { s.set({ preferCodec: c.value }); onReload?.(); setSection('main'); showToast(`已切换为 ${c.label}`); }}
-                          style={[styles.gridBtn, { backgroundColor: s.preferCodec === c.value ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.gridBtn, { backgroundColor: s.preferCodec === c.value ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.subhead, { color: s.preferCodec === c.value ? '#FFF' : colors.text, fontWeight: '600' }]}>{c.label}</Text>
                           <Text style={[T.caption2, { color: s.preferCodec === c.value ? 'rgba(255,255,255,0.7)' : colors.textTertiary, marginTop: 2 }]}>{c.desc}</Text>
                         </Press>
@@ -525,7 +562,7 @@ export function PlayerSettingsSheet({
                       {[0, 25, 50, 75, 100].map((v) => (
                         <Press key={v} haptic scaleTo={0.9}
                           onPress={() => { setVolume(v); onVolumeChange?.(v / 100); }}
-                          style={[styles.chip, { backgroundColor: volume === v ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.chip, { backgroundColor: volume === v ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.caption1, { color: volume === v ? '#FFF' : colors.textSecondary }]}>{v}%</Text>
                         </Press>
                       ))}
@@ -541,7 +578,7 @@ export function PlayerSettingsSheet({
                       {SLEEP_OPTIONS.map((opt) => (
                         <Press key={opt.value} haptic scaleTo={0.9}
                           onPress={() => handleSleep(opt.value)}
-                          style={[styles.gridBtn, { backgroundColor: sleepRemainMin === opt.value && opt.value > 0 ? ACCENT : colors.fill2, ...continuous }]}>
+                          style={[styles.gridBtn, { backgroundColor: sleepRemainMin === opt.value && opt.value > 0 ? accent : colors.fill2, ...continuous }]}>
                           <Text style={[T.caption1, { color: sleepRemainMin === opt.value && opt.value > 0 ? '#FFF' : colors.text }]}>{opt.label}</Text>
                         </Press>
                       ))}
@@ -584,13 +621,14 @@ function ChipRow({ label, options, current, onSelect, colors, T, format, last }:
   label: string; options: number[]; current: number; onSelect: (v: number) => void;
   colors: any; T: any; format: (v: number) => string; last?: boolean;
 }) {
+  const accent = useAccent();
   return (
     <View style={[styles.row, !last && { borderBottomColor: colors.separator, borderBottomWidth: StyleSheet.hairlineWidth }]}>
       <Text style={[T.subhead, styles.rowLabel, { color: colors.text }]}>{label}</Text>
       <View style={styles.chipRow}>
         {options.map((v) => (
           <Press key={v} haptic scaleTo={0.9} onPress={() => onSelect(v)}
-            style={[styles.chip, { backgroundColor: current === v ? ACCENT : colors.fill2, ...continuous }]}>
+            style={[styles.chip, { backgroundColor: current === v ? accent : colors.fill2, ...continuous }]}>
             <Text style={[T.caption1, { color: current === v ? '#FFF' : colors.textSecondary }]}>{format(v)}</Text>
           </Press>
         ))}

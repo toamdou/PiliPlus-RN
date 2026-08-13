@@ -12,9 +12,10 @@ import { searchApi } from '@/api/search';
 import { useSearchSuggestions } from '@/hooks/use-search-suggestions';
 import { clearSearchHistory, loadSearchHistory } from '@/utils/search-history';
 import { useSettingsStore } from '@/stores/settings';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors } from '@/components/SwiftUIHost';
 import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
+import { BILI } from '@/theme/bili-colors';
 import { RADII, continuous, shadow } from '@/theme/tokens';
 import { feedBackSelection } from '@/utils/feedback';
 import { createNativeRequestCancelToken, type NativeRequestCancelToken } from '@/utils/request-cancel';
@@ -156,30 +157,32 @@ export default function SearchScreen() {
         onChangeText={(e: any) => setKeyword(typeof e === 'string' ? e : e?.nativeEvent?.text ?? '')}
         onSearchButtonPress={(e: any) => goSearch(typeof e === 'string' ? e : e?.nativeEvent?.text ?? keyword)}
         onCancelButtonPress={() => router.back()}
-        tintColor={ACCENT}
+        tintColor={colors.accent}
         textColor={colors.text}
         hintTextColor={colors.textTertiary}
         headerIconColor={colors.textSecondary}
       />
 
       <View style={[styles.container, { backgroundColor: colors.bg }]}>
-        {/* 搜索建议浮层 */}
+        {/* 搜索建议浮层（S3：绝对定位浮层，不参与文档流、不推挤下方热搜/历史内容） */}
         {showSuggest && suggestions.length > 0 && (
-          <Glass variant="regular" style={[styles.suggestCard, continuous, shadow('glass', colors.isDark)]}>
-            {suggestions.map((s, i) => (
-              <Press
-                key={i}
-                haptic
-                scaleTo={0.97}
-                style={styles.suggestItem}
-                onPress={() => goSearch(s.value)}>
-                <Ionicons name="search" size={14} color={colors.textTertiary} />
-                <RNText style={[T.subhead, { color: colors.text, flex: 1 }]} numberOfLines={1}>
-                  {s.value}
-                </RNText>
-              </Press>
-            ))}
-          </Glass>
+          <View style={styles.suggestOverlay} pointerEvents="box-none">
+            <Glass variant="regular" style={[styles.suggestCard, continuous, shadow('glass', colors.isDark)]}>
+              {suggestions.map((s, i) => (
+                <Press
+                  key={i}
+                  haptic
+                  scaleTo={0.97}
+                  style={styles.suggestItem}
+                  onPress={() => goSearch(s.value)}>
+                  <Ionicons name="search" size={14} color={colors.textTertiary} />
+                  <RNText style={[T.subhead, { color: colors.text, flex: 1 }]} numberOfLines={1}>
+                    {s.value}
+                  </RNText>
+                </Press>
+              ))}
+            </Glass>
+          </View>
         )}
 
         <ScrollView style={styles.body} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, gap: 18, paddingTop: 12, paddingBottom: 100 }}>
@@ -211,12 +214,12 @@ export default function SearchScreen() {
                   scaleTo={0.94}
                   style={[styles.defaultWordChip, { backgroundColor: colors.fill2 }, continuous]}
                   onPress={() => goSearch(defaultWord)}>
-                  <Ionicons name="sparkles" size={12} color={ACCENT} />
+                  <Ionicons name="sparkles" size={12} color={colors.accent} />
                   <RNText style={[T.footnote, styles.defaultWordText, { color: colors.text }]} numberOfLines={1}>
                     {defaultWord}
                   </RNText>
-                  <View style={[styles.defaultWordTag, { backgroundColor: 'rgba(251,114,153,0.15)' }]}>
-                    <RNText style={[T.caption2, styles.defaultWordTagText]}>默认词</RNText>
+                  <View style={[styles.defaultWordTag, { backgroundColor: BILI.pinkDim }]}>
+                    <RNText style={[T.caption2, styles.defaultWordTagText, { color: colors.accent }]}>默认词</RNText>
                   </View>
                 </Press>
               )}
@@ -228,15 +231,15 @@ export default function SearchScreen() {
                     scaleTo={0.97}
                     style={styles.hotItem}
                     onPress={() => goSearch(item.keyword)}>
-                    <RNText style={[T.subhead, styles.hotRank, { color: i < 3 ? ACCENT : colors.textTertiary }]}>
+                    <RNText style={[T.subhead, styles.hotRank, { color: i < 3 ? colors.accent : colors.textTertiary }]}>
                       {i + 1}
                     </RNText>
-                    <RNText style={[T.subhead, styles.hotText, { color: colors.isDark ? '#FFFFFF' : '#1C1C1E' }]} numberOfLines={1}>
+                    <RNText style={[T.subhead, styles.hotText, { color: colors.text }]} numberOfLines={1}>
                       {item.keyword}
                     </RNText>
                     {item.icon ? (
-                      <View style={[styles.hotTag, { backgroundColor: item.icon === '热' ? '#FF3B30' : '#FF9500' }]}>
-                        <RNText style={styles.hotTagText}>{item.icon}</RNText>
+                      <View style={[styles.hotTag, { backgroundColor: item.icon === '热' ? BILI.hot : BILI.new }]}>
+                        <RNText style={[T.caption2, styles.hotTagText]}>{item.icon}</RNText>
                       </View>
                     ) : null}
                   </Press>
@@ -279,7 +282,7 @@ export default function SearchScreen() {
             <View style={[styles.sectionCard, { backgroundColor: colors.card }, continuous]}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionTitleRow}>
-                  <Ionicons name="compass-outline" size={17} color={ACCENT} />
+                  <Ionicons name="compass-outline" size={17} color={colors.accent} />
                   <RNText style={[T.headline, styles.sectionTitle, { color: colors.text }]}>搜索发现</RNText>
                 </View>
                 {rcmdLoading ? (
@@ -294,16 +297,16 @@ export default function SearchScreen() {
                     scaleTo={0.97}
                     style={styles.hotItem}
                     onPress={() => goSearch(item.keyword)}>
-                    <RNText style={[T.subhead, styles.hotText, { color: colors.isDark ? '#FFFFFF' : '#1C1C1E' }]} numberOfLines={1}>
+                    <RNText style={[T.subhead, styles.hotText, { color: colors.text }]} numberOfLines={1}>
                       {item.keyword}
                     </RNText>
                     {item.icon ? (
-                      <View style={[styles.hotTag, { backgroundColor: item.icon.includes('hot') ? '#FF3B30' : '#FF9500' }]}>
-                        <RNText style={styles.hotTagText}>{item.icon.includes('new') ? '新' : item.icon.includes('hot') ? '热' : ''}</RNText>
+                      <View style={[styles.hotTag, { backgroundColor: item.icon.includes('hot') ? BILI.hot : BILI.new }]}>
+                        <RNText style={[T.caption2, styles.hotTagText]}>{item.icon.includes('new') ? '新' : item.icon.includes('hot') ? '热' : ''}</RNText>
                       </View>
                     ) : item.showLiveIcon ? (
-                      <View style={[styles.hotTag, { backgroundColor: '#FF3B30' }]}>
-                        <RNText style={styles.hotTagText}>直播</RNText>
+                      <View style={[styles.hotTag, { backgroundColor: BILI.hot }]}>
+                        <RNText style={[T.caption2, styles.hotTagText]}>直播</RNText>
                       </View>
                     ) : item.recommendReason ? (
                       <RNText style={[T.caption2, { color: colors.textTertiary, flexShrink: 1 }]} numberOfLines={1}>
@@ -351,8 +354,9 @@ const styles = StyleSheet.create({
     maxWidth: '100%',
   },
   defaultWordText: { flexShrink: 1, fontWeight: '500' },
-  defaultWordTag: { borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-  defaultWordTagText: { color: ACCENT, fontSize: 9, fontWeight: '700' },
+  /* 默认词 tag 圆角收敛 RADII.xs（05-B5，原 4 硬编码）；文字颜色动态跟随主题色 */
+  defaultWordTag: { borderRadius: RADII.xs, paddingHorizontal: 4, paddingVertical: 1 },
+  defaultWordTagText: { fontWeight: '700' },
   hotGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   hotItem: {
     width: '50%',
@@ -364,15 +368,26 @@ const styles = StyleSheet.create({
   },
   hotRank: { fontWeight: '600', width: 18, textAlign: 'center' },
   hotText: { flexShrink: 1 },
-  hotTag: { paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 },
-  hotTagText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
+  /* 热榜徽章：圆角 RADII.xs、字号走 T.caption2（05-B5，原圆角 3/字号 10/9 硬编码） */
+  hotTag: { paddingHorizontal: 4, paddingVertical: 1, borderRadius: RADII.xs },
+  hotTagText: { color: '#FFFFFF', fontWeight: '700' },
   historyFlow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   historyChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADII.sm },
   historyText: {},
   /* 搜索建议 */
+  /* S3：绝对定位浮层——悬浮于内容之上，不参与文档流、不推挤下方热搜/历史 */
+  suggestOverlay: {
+    position: 'absolute',
+    top: 6,
+    left: 0,
+    right: 0,
+    zIndex: 30,
+  },
   suggestCard: {
-    marginHorizontal: 14, marginTop: 6, marginBottom: 4,
-    borderRadius: RADII.md, paddingVertical: 6, paddingHorizontal: 4,
+    marginHorizontal: 14,
+    borderRadius: RADII.md,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
   suggestItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10 },
 });

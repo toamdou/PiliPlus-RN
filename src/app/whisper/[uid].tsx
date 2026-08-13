@@ -1,18 +1,25 @@
 import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
   View, Text, TextInput, StyleSheet,
-  KeyboardAvoidingView, ActivityIndicator,
+  KeyboardAvoidingView, Keyboard, ActivityIndicator,
+  ActionSheetIOS, Alert,
 } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, useReducedMotion } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
-import { Press } from '@/components/motion';
+import { useThemeColors } from '@/components/SwiftUIHost';
+import { Press, MOTION } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { msgApi } from '@/api/msg';
+import { post, tClient } from '@/api/client';
+import { Api } from '@/api/endpoints';
+import { getCSRF } from '@/utils/cookie';
+import { EmotePicker } from '@/components/emote/EmotePicker';
 import { formatTime } from '@/utils/format';
 import { biliCover } from '@/utils/image-url';
 import { feedBackSuccess, feedBackError } from '@/utils/feedback';
@@ -70,6 +77,7 @@ const BubbleRow = memo(function BubbleRow({
   talkerFace,
   colors,
   T,
+  onLongPress,
 }: {
   item: Msg;
   showTime: boolean;
@@ -77,10 +85,22 @@ const BubbleRow = memo(function BubbleRow({
   talkerFace: string;
   colors: ReturnType<typeof useThemeColors>;
   T: ReturnType<typeof useType>;
+  onLongPress?: (item: Msg) => void;
 }) {
   const images = item.imageUrls || (item.msg_type === 2 && item.picUrl ? [item.picUrl] : []);
+  /* 新消息入场：translateY + spring（05-B15/05-C3）；减弱动态效果时直接呈现最终态 */
+  const reducedMotion = useReducedMotion();
+  const entry = useSharedValue(reducedMotion ? 1 : 0);
+  useEffect(() => {
+    if (reducedMotion) return;
+    entry.set(withSpring(1, MOTION.spring));
+  }, [reducedMotion, entry]);
+  const entryStyle = useAnimatedStyle(() => ({
+    opacity: entry.value,
+    transform: [{ translateY: (1 - entry.value) * 12 }],
+  }));
   return (
-    <View>
+    <Animated.View style={entryStyle}>
       {showTime ? (
         <Text style={[T.caption2, styles.timeDivider, { color: colors.textTertiary }]}>{formatTime(item.timestamp)}</Text>
       ) : null}
@@ -94,7 +114,14 @@ const BubbleRow = memo(function BubbleRow({
             contentFit="cover"
           />
         ) : null}
-        <View style={[styles.bubble, isMine ? { backgroundColor: ACCENT } : { backgroundColor: colors.fill2 }]}>
+        {/* 气泡：四角 RADII.lg，尾巴角（同侧下角 4-6pt）由 bubbleMine/bubbleTheir 覆盖。
+            长按弹出消息菜单（撤回/复制/举报）——Press 透传 onLongPress，不干扰点击区域 */}
+        <Press
+          haptic="medium"
+          delayLongPress={350}
+          scaleTo={0.97}
+          onLongPress={() => onLongPress?.(item)}
+          style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheir, { backgroundColor: isMine ? colors.accent : colors.fill2 }]}>
           {images.length > 0 ? (
             <View style={styles.imageBubble}>
               {images.map((uri, i) => (
@@ -116,9 +143,9 @@ const BubbleRow = memo(function BubbleRow({
               <Text style={[T.caption2, { color: isMine ? 'rgba(255,255,255,0.8)' : colors.textTertiary }]}>图片消息</Text>
             </View>
           )}
-        </View>
+        </Press>
       </View>
-    </View>
+    </Animated.View>
   );
 });
 
@@ -136,6 +163,7 @@ export default function WhisperDetailScreen() {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [pickingImage, setPickingImage] = useState(false);
+  const [showEmote, setShowEmote] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMore, setHasMore] = useState(false);
@@ -320,6 +348,111 @@ export default function WhisperDetailScreen() {
     }
   }
 
+  /* ===== 长按消息菜单：撤回 / 复制 / 举报（02-feature-parity whisper_detail） ===== */
+  /* 举报原因（对齐 B 站 im report 常见 reason_id） */
+  const REPORT_REASONS = [
+    { label: '垃圾广告', value: 4 },
+    { label: '色情低俗', value: 7 },
+    { label: '违法信息', value: 1 },
+    { label: '人身攻击', value: 6 },
+    { label: '其他', value: 0 },
+  ];
+
+  /* 撤回自己的消息：本地乐观置为 [已撤回]，服务端失败则回滚 */
+  const recallMessage = useCallback(async (item: Msg) => {
+    try {
+      const res = await post(tClient, '/web_im/v1/web_im/recall_msg', null, {
+        talker_id: parseInt(uid, 10),
+        msg_seqno: item.msg_seqno,
+        session_type: 1,
+        build: 0,
+        mobi_app: 'web',
+        csrf: getCSRF() ?? '',
+        csrf_token: getCSRF() ?? '',
+      });
+      if (res?.code === 0 || res?.code === undefined) {
+        setMessages((prev) => prev.map((m) =>
+          m.msg_seqno === item.msg_seqno
+            ? { ...m, msg_type: 5, content: '', text: '[已撤回]', imageUrls: [], picUrl: '' }
+            : m,
+        ));
+        feedBackSuccess();
+        showToast('已撤回');
+      } else {
+        showToast(res?.message || '撤回失败');
+      }
+    } catch {
+      showToast('撤回失败');
+    }
+  }, [uid]);
+
+  const copyText = useCallback(async (text: string) => {
+    await Clipboard.setStringAsync(text);
+    feedBackSuccess();
+    showToast('已复制');
+  }, []);
+
+  const copyImageUrl = useCallback(async (url: string) => {
+    await Clipboard.setStringAsync(url);
+    feedBackSuccess();
+    showToast('图片链接已复制');
+  }, []);
+
+  const reportMessage = useCallback((item: Msg) => {
+    const text = item.text || item.content || '';
+    Alert.alert('举报该消息', '请选择举报原因', [
+      ...REPORT_REASONS.map((r) => ({
+        text: r.label,
+        onPress: async () => {
+          try {
+            const res = await post(tClient, Api.imMsgReport, null, {
+              talker_id: parseInt(uid, 10),
+              seqno: item.msg_seqno,
+              reason_id: r.value,
+              content: text,
+              csrf: getCSRF() ?? '',
+              csrf_token: getCSRF() ?? '',
+            });
+            showToast(res?.code === 0 ? '举报已提交' : res?.message || '举报失败');
+          } catch {
+            showToast('举报失败，请重试');
+          }
+        },
+      })),
+      { text: '取消', style: 'cancel' },
+    ]);
+  }, [uid]);
+
+  /* 长按气泡 → ActionSheet 菜单（对齐 SwiftUI ContextMenu/ActionSheet 既有模式） */
+  const handleLongPress = useCallback((item: Msg) => {
+    const isMine = item.sender_uid === myMid;
+    const isRecalled = item.msg_type === 5;
+    const isPending = !!item.isOptimistic;
+    const text = item.text || item.content || '';
+    const imageUrl = item.imageUrls?.[0] || item.picUrl || '';
+    const actions: { label: string; onPress: () => void }[] = [];
+    if (isMine && !isRecalled && !isPending) {
+      actions.push({ label: '撤回', onPress: () => recallMessage(item) });
+    }
+    if (text) {
+      actions.push({ label: '复制', onPress: () => copyText(text) });
+    } else if (imageUrl) {
+      actions.push({ label: '复制图片链接', onPress: () => copyImageUrl(imageUrl) });
+    }
+    actions.push({ label: '举报', onPress: () => reportMessage(item) });
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        title: isMine ? '我的消息' : '消息',
+        message: text || (imageUrl ? '图片消息' : ''),
+        options: [...actions.map((a) => a.label), '取消'],
+        cancelButtonIndex: actions.length,
+      },
+      (idx) => {
+        if (idx >= 0 && idx < actions.length) actions[idx].onPress();
+      },
+    );
+  }, [myMid, recallMessage, copyText, copyImageUrl, reportMessage]);
+
   /* 气泡（renderItem memo：FlashList v2 按引用相等性跳过单元格重渲染） */
   const renderBubble = useCallback(
     ({ item, index }: { item: Msg; index: number }) => {
@@ -327,10 +460,10 @@ export default function WhisperDetailScreen() {
       const prev = messages[index - 1]; // 上一索引是更早消息
       const showTime = !prev || item.timestamp - prev.timestamp > 300;
       return (
-        <BubbleRow item={item} showTime={showTime} isMine={isMine} talkerFace={talkerFace} colors={colors} T={T} />
+        <BubbleRow item={item} showTime={showTime} isMine={isMine} talkerFace={talkerFace} colors={colors} T={T} onLongPress={handleLongPress} />
       );
     },
-    [colors, talkerFace, myMid, T, messages],
+    [colors, talkerFace, myMid, T, messages, handleLongPress],
   );
 
   /* renderItem memo：FlashList v2 按引用相等性跳过单元格重渲染 */
@@ -370,9 +503,7 @@ export default function WhisperDetailScreen() {
               animateAutoScrollToBottom: true,
             }}
             estimatedItemSize={160}
-            windowSize={9}
-            initialNumToRender={10}
-            maxToRenderPerBatch={12}
+            drawDistance={250}
             overrideProps={{ initialDrawBatchSize: 10 }}
             onStartReached={loadOlder}
             onStartReachedThreshold={0.3}
@@ -404,13 +535,25 @@ export default function WhisperDetailScreen() {
             style={[styles.imageBtn, { backgroundColor: colors.fill2 }]}>
             <Ionicons name="image-outline" size={21} color={sending || pickingImage ? colors.textTertiary : colors.textSecondary} />
           </Press>
+          {/* 表情面板按钮（EmotePicker 由并行代理 N2 实现，此处按契约接线） */}
+          <Press
+            haptic
+            scaleTo={0.9}
+            disabled={sending}
+            onPress={() => {
+              Keyboard.dismiss();
+              setShowEmote((v) => !v);
+            }}
+            style={[styles.imageBtn, { backgroundColor: showEmote ? colors.accent : colors.fill2 }]}>
+            <Ionicons name="happy-outline" size={21} color={showEmote ? '#FFFFFF' : colors.textSecondary} />
+          </Press>
           <View style={[styles.inputField, { backgroundColor: colors.fill2 }]}>
             <TextInput
               value={input}
               onChangeText={setInput}
               placeholder="发送消息…"
               placeholderTextColor={colors.textTertiary}
-              style={[styles.textInput, { color: colors.text }]}
+              style={[T.body, styles.textInput, { color: colors.text }]}
               multiline
               maxLength={500}
             />
@@ -420,11 +563,18 @@ export default function WhisperDetailScreen() {
             scaleTo={0.9}
             disabled={!input.trim() || sending}
             onPress={sendMsg}
-            style={[styles.sendBtn, { backgroundColor: input.trim() ? ACCENT : colors.fill2 }]}>
+            style={[styles.sendBtn, { backgroundColor: input.trim() ? colors.accent : colors.fill2 }]}>
             <Ionicons name="arrow-up" size={20} color={input.trim() ? '#FFFFFF' : colors.textTertiary} />
           </Press>
         </View>
       </KeyboardAvoidingView>
+
+      {/* 表情面板：onSelect 把 [xxx] 文本码拼进输入框（契约 EmotePicker({visible,onSelect(code),onClose})） */}
+      <EmotePicker
+        visible={showEmote}
+        onSelect={(code) => setInput((v) => v + code)}
+        onClose={() => setShowEmote(false)}
+      />
     </View>
   );
 }
@@ -441,6 +591,9 @@ const styles = StyleSheet.create({
   bubbleRowTheir: { justifyContent: 'flex-start' },
   miniAvatar: { width: 28, height: 28, borderRadius: 14 },
   bubble: { maxWidth: '74%', paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADII.lg, ...continuous },
+  /* 尾巴角：同侧下角收小（iMessage 式，05-B15），另三角保持 RADII.lg */
+  bubbleMine: { borderBottomRightRadius: 5, ...continuous },
+  bubbleTheir: { borderBottomLeftRadius: 5, ...continuous },
   bubbleText: { lineHeight: 20.5 },
   imageBubble: { gap: 6, maxWidth: 210 },
   bubbleImage: { width: 210, height: 158, borderRadius: RADII.sm },
@@ -452,7 +605,8 @@ const styles = StyleSheet.create({
   /* 输入栏 */
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   inputField: { flex: 1, borderRadius: RADII.lg, paddingHorizontal: 14, paddingVertical: 4, maxHeight: 100, justifyContent: 'center', ...continuous },
-  textInput: { fontSize: 15, lineHeight: 20, maxHeight: 92 },
+  /* 输入框字号跟随全局字阶（05-B15，原 fontSize 15 硬编码 → T.body） */
+  textInput: { maxHeight: 92 },
   imageBtn: { width: 36, height: 36, borderRadius: RADII.circle, justifyContent: 'center', alignItems: 'center', marginBottom: 2, ...continuous },
   sendBtn: { width: 36, height: 36, borderRadius: RADII.circle, justifyContent: 'center', alignItems: 'center', marginBottom: 2, ...continuous },
 });

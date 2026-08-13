@@ -8,6 +8,7 @@ export const TABS: { key: MemberTab; label: string }[] = [
   { key: 'videos', label: '投稿' },
   { key: 'dynamics', label: '动态' },
   { key: 'coins', label: '投币' },
+  { key: 'like', label: '喜欢' },
   { key: 'opus', label: '作品' },
   { key: 'article', label: '文章' },
   { key: 'audio', label: '音频' },

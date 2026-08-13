@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Press, Reveal } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { BILI } from '@/theme/bili-colors';
 import { formatCount } from '@/utils/format';
 import { useSettingsStore } from '@/stores/settings';
 import { RADII, continuous, shadow } from '@/theme/tokens';
@@ -34,16 +35,29 @@ export function MemberHeaderCard({
   const showMedal = useSettingsStore((s) => s.showMedal);
   const showDecorate = useSettingsStore((s) => s.showDecorate);
   const isVip = info?.vip?.status === 1;
+  /* 批次5 P3：头像挂件（pendant）——来自空间接口，仅当字段存在且展示装饰开启时渲染 */
+  const pendantUrl = info?.pendant?.image || '';
 
   return (
     <Reveal delay={0}>
       <View style={[styles.profileCard, { backgroundColor: colors.card, ...shadow('md', colors.isDark) }]}>
         <View style={styles.profileTop}>
-          <ExpoImage
-            source={{ uri: biliCover(info?.face || '', 256, 256) }}
-            style={[styles.avatar, { backgroundColor: colors.fill2 }]}
-            contentFit="cover"
-          />
+          <View style={styles.avatarWrap}>
+            <ExpoImage
+              source={{ uri: biliCover(info?.face || '', 256, 256) }}
+              style={[styles.avatar, { backgroundColor: colors.fill2 }]}
+              contentFit="cover"
+            />
+            {/* 头像挂件装饰层：叠在头像右上角位，尺寸 token 化；字段缺失/接口不含则不渲染 */}
+            {showDecorate && pendantUrl ? (
+              <ExpoImage
+                source={{ uri: biliCover(pendantUrl, 160, 160) }}
+                style={styles.avatarPendant}
+                contentFit="contain"
+                pointerEvents="none"
+              />
+            ) : null}
+          </View>
           <View style={styles.nameWrap}>
             <Text style={[T.title3, styles.name, { color: colors.text }]} numberOfLines={1}>{info?.name}</Text>
             <View style={styles.badgeRow}>
@@ -61,8 +75,9 @@ export function MemberHeaderCard({
         </View>
         {showDecorate && info?.official.title ? (
           <View style={styles.officialRow}>
-            <Ionicons name="checkmark-done-circle" size={13} color="#FF9500" />
-            <Text style={[T.caption1, styles.officialText, { color: '#FF9500' }]} numberOfLines={1}>{info.official.title}</Text>
+            {/* 官方认证星标：运营星级 token（原 #FF9500 硬编码 → BILI.star） */}
+            <Ionicons name="checkmark-done-circle" size={13} color={BILI.star} />
+            <Text style={[T.caption1, styles.officialText, { color: BILI.star }]} numberOfLines={1}>{info.official.title}</Text>
           </View>
         ) : null}
         <Text style={[T.footnote, styles.sign, { color: colors.textSecondary }]} numberOfLines={3}>
@@ -128,12 +143,17 @@ const styles = StyleSheet.create({
   profileCard: { borderRadius: RADII.lg, padding: 18, ...continuous },
   profileTop: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   avatar: { width: 68, height: 68, borderRadius: 34 },
+  /* 头像挂件：挂件图以绝对定位叠在头像右上角（尺寸 token 化：挂件约头像 46%，卡片左上偏移留出挂件出框空间） */
+  avatarWrap: { width: 68, height: 68, borderRadius: 34, ...continuous },
+  avatarPendant: { position: 'absolute', top: -7, right: -7, width: 31, height: 31, zIndex: 2 },
   nameWrap: { flex: 1, gap: 7 },
   name: { fontWeight: '800' },
   badgeRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  lvBadge: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  /* 徽章圆角统一 RADII.xs（05-C1：徽章/tag 收敛 3/4/5/6） */
+  lvBadge: { borderRadius: RADII.xs, paddingHorizontal: 6, paddingVertical: 2 },
   lvText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '700' },
-  vipBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#FF6699', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
+  /* VIP 徽章：品牌粉 token（05-B8，原 #FF6699 硬编码 → BILI.pink，深色模式自动提亮） */
+  vipBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: BILI.pink, borderRadius: RADII.xs, paddingHorizontal: 6, paddingVertical: 2 },
   vipText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '700' },
   officialRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 12 },
   officialText: { flex: 1 },

@@ -15,6 +15,8 @@ import { VideoCard, cellHeightFor, type VideoItem } from '@/components/video/Vid
 import { type FlashListItemLayout } from '@/utils/list-layout';
 import { feedBackMedium } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 function mapItems(raw: any[]): VideoItem[] {
   return (raw || []).map((i: any) => {
@@ -87,9 +89,6 @@ export default function PopularPreciousScreen() {
         onEndReachedThreshold={0.4}
         estimatedItemSize={220}
         overrideItemLayout={overrideItemLayout}
-        windowSize={9}
-        initialNumToRender={8}
-        maxToRenderPerBatch={10}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListEmptyComponent={
@@ -98,19 +97,9 @@ export default function PopularPreciousScreen() {
               <Host matchContents><ProgressView /></Host>
             </View>
           ) : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text, fontWeight: '600' }]}>加载失败</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={styles.retryBtn}>
-                <Text style={[T.subhead, { color: '#FFFFFF', fontWeight: '600' }]}>重新加载</Text>
-              </Press>
-            </View>
+            <ErrorState title="加载失败" onRetry={refresh} retryLabel="重新加载" />
           ) : (
-            <View style={styles.emptyWrap}>
-              <Text style={[T.footnote, { color: colors.textTertiary }]}>暂无内容</Text>
-            </View>
+            <EmptyState title="暂无内容" />
           )
         }
         ListFooterComponent={
@@ -128,7 +117,4 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   listContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
   loadingWrap: { height: 260, justifyContent: 'center', alignItems: 'center' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 120, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  retryBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10 },
 });

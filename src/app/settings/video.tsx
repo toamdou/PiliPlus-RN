@@ -62,7 +62,14 @@ const CODECS = [
 ];
 
 const BUFFER_SIZES = [16, 32, 64, 128, 256];
-const BUFFER_SECS = [30, 60, 90, 120, 180];
+// 01-M1/S3（P0）：bufferSec 默认已改 15，档位列表补齐 15 以保证选择器初始高亮正确。
+const BUFFER_SECS = [15, 30, 60, 90, 120, 180];
+// 04-B3/B4（P1）：画面比例三档，直通原生 videoGravity（contain=适应/cover=填充/fill=拉伸）。
+const VIDEO_GRAVITIES = [
+  { label: '适应（contain）', value: 'contain' },
+  { label: '填充（cover）', value: 'cover' },
+  { label: '拉伸（fill）', value: 'fill' },
+] as const;
 
 function idx<T>(arr: readonly T[], pred: (v: T) => boolean): number {
   const i = arr.findIndex(pred);
@@ -129,6 +136,7 @@ export default function VideoSettingsScreen() {
   const [codecIdx, setCodecIdx] = useState(() => idx(CODECS, (c) => c.value === s.preferCodec));
   const [bufSizeIdx, setBufSizeIdx] = useState(() => idx(BUFFER_SIZES, (v) => v === s.bufferSize));
   const [bufSecIdx, setBufSecIdx] = useState(() => idx(BUFFER_SECS, (v) => v === s.bufferSec));
+  const [videoGravityIdx, setVideoGravityIdx] = useState(() => idx(VIDEO_GRAVITIES, (v) => v.value === s.videoGravity));
 
   useEffect(() => {
     if (!isModuleAvailable()) {
@@ -254,6 +262,14 @@ export default function VideoSettingsScreen() {
               onSelectionChange={(v) => { const i = Number(v); setCellQualityIdx(i); s.set({ cellularQuality: QUALITIES[i].value }); }}
               modifiers={[pickerStyle('menu')]}>
               {QUALITIES.map((q, i) => <Text key={q.value} modifiers={[tag(i)]}>{q.label}</Text>)}
+            </Picker>
+          </Section>
+
+          <Section title="画面比例">
+            <Picker label="画面填充模式" systemImage="rectangle.expand.vertical" selection={videoGravityIdx}
+              onSelectionChange={(v) => { const i = Number(v); setVideoGravityIdx(i); s.set({ videoGravity: VIDEO_GRAVITIES[i].value }); }}
+              modifiers={[pickerStyle('menu')]}>
+              {VIDEO_GRAVITIES.map((g, i) => <Text key={g.value} modifiers={[tag(i)]}>{g.label}</Text>)}
             </Picker>
           </Section>
 

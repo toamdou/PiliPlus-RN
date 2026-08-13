@@ -62,6 +62,7 @@ export interface VideoInfo {
 }
 
 export function useVideoComments(info: VideoInfo | null) {
+  'use no memo';
   const [replies, setReplies] = useState<ReplyItem[]>([]);
   const [, setReplyPage] = useState(1);
   const replyCursorRef = useRef(0); // 已登录 /x/v2/reply 的当前页码（下次 pn = cursor + 1）
@@ -76,6 +77,9 @@ export function useVideoComments(info: VideoInfo | null) {
   const subPreloadActiveRef = useRef(0); // 正在执行的预加载请求数
   const subPreloadDrainingRef = useRef(false); // 队列消费者互斥锁
   const [commentsLoaded, setCommentsLoaded] = useState(false);
+  /** commentsLoaded 的 ref 镜像（异步回调/useCallback 闭包读取最新值，避免闭包陈旧——审计 06-N3/V3） */
+  const commentsLoadedRef = useRef(false);
+  useEffect(() => { commentsLoadedRef.current = commentsLoaded; }, [commentsLoaded]);
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [commentsLoadingMore, setCommentsLoadingMore] = useState(false);
   const commentsLoadingMoreRef = useRef(false);
@@ -98,7 +102,9 @@ export function useVideoComments(info: VideoInfo | null) {
   useEffect(() => { repliesRef.current = replies; }, [replies]);
 
   async function loadCommentsFor(aid: number) {
-    if (commentsLoaded) return;
+    // 读取 ref 而非渲染期 state：切 P 后 info 变化重建的回调闭包可能携带旧的 commentsLoaded=true，
+    // 导致 changeCommentSort/retryComments 先 setCommentsLoaded(false) 再调用时被直接短路（06-N3/V3）。
+    if (commentsLoadedRef.current) return;
     const token = mainCancelRef.current ?? createNativeRequestCancelToken();
     mainCancelRef.current = token;
     const s = useSettingsStore.getState();
@@ -157,6 +163,7 @@ export function useVideoComments(info: VideoInfo | null) {
   }
 
   /* 预加载楼中楼：只处理传入的可视区评论，按小并发队列逐个拉取第 1 页 */
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const drainSubPreloadQueue = useCallback(async (aid: number) => {
     if (subPreloadDrainingRef.current) return;
     subPreloadDrainingRef.current = true;
@@ -192,6 +199,7 @@ export function useVideoComments(info: VideoInfo | null) {
     }
   }, []);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const preloadSubReplies = useCallback((aid: number, list: ReplyItem[]) => {
     if (!aid || !Array.isArray(list) || list.length === 0) return;
     const queue = subPreloadQueueRef.current;
@@ -419,6 +427,7 @@ export function useVideoComments(info: VideoInfo | null) {
     setReplyDetail({ rpid, rcount: c.rcount || 0, replies: c.replies || [] });
   }, []);
   const retryComments = useCallback(() => {
+    commentsLoadedRef.current = false;
     setCommentsLoaded(false);
     setCommentsError(null);
     if (info) loadCommentsFor(info.aid);
@@ -434,6 +443,7 @@ export function useVideoComments(info: VideoInfo | null) {
     repliesRef.current = [];
     setExpandedReplies(new Set());
     setHasMoreReplies(true);
+    commentsLoadedRef.current = false;
     setCommentsLoaded(false);
     setCommentsError(null);
     replyCursorRef.current = 0;

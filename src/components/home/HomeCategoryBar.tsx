@@ -19,7 +19,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import MaskedView from '@react-native-masked-view/masked-view';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors } from '@/components/SwiftUIHost';
 import { Press } from '@/components/motion';
 import { feedBackSelection } from '@/utils/feedback';
 import { useType } from '@/components/type-scale';
@@ -41,6 +41,7 @@ function CategoryTab({
   isActive,
   scale,
   colors,
+  T,
   onPress,
   onLayout,
 }: {
@@ -49,6 +50,7 @@ function CategoryTab({
   isActive: boolean;
   scale: SharedValue<number>;
   colors: ReturnType<typeof useThemeColors>;
+  T: ReturnType<typeof useType>;
   onPress: (cat: Category, index: number) => void;
   onLayout: (e: LayoutChangeEvent) => void;
 }) {
@@ -64,11 +66,12 @@ function CategoryTab({
       style={styles.categoryItem}>
       <Animated.Text
         style={[
+          /* 字号走全局字阶（05-B1，原 17/15 硬编码）：激活 T.body / 未激活 T.subhead */
+          isActive ? T.body : T.subhead,
           styles.categoryText,
           {
             color: isActive ? colors.text : colors.textTertiary,
             fontWeight: isActive ? '700' : '400',
-            fontSize: isActive ? 17 : 15,
           },
           textAnim,
         ]}>
@@ -184,7 +187,7 @@ export function HomeCategoryBar({
             pointerEvents="none"
             style={[
               styles.categoryIndicator,
-              { backgroundColor: 'rgba(251,114,153,0.12)' },
+              { backgroundColor: colors.accent, borderColor: colors.accent },
               indicatorStyle,
             ]}
           />
@@ -198,6 +201,7 @@ export function HomeCategoryBar({
                 isActive={isActive}
                 scale={textScale[index]}
                 colors={colors}
+                T={T}
                 onPress={handleSelect}
                 onLayout={(e) => {
                   const { x, width } = e.nativeEvent.layout;
@@ -231,7 +235,7 @@ export function HomeCategoryBar({
                     feedBackSelection();
                     onSelectPartition(i);
                   }}
-                  style={[styles.partitionChip, continuous, i === activePartitionIdx ? { backgroundColor: ACCENT } : { backgroundColor: colors.fill2 }]}>
+                  style={[styles.partitionChip, continuous, i === activePartitionIdx ? { backgroundColor: colors.accent } : { backgroundColor: colors.fill2 }]}>
                   <Text style={[T.footnote, { color: i === activePartitionIdx ? '#FFFFFF' : colors.textSecondary, fontWeight: i === activePartitionIdx ? '600' : '400' }]}>
                     {p.label}
                   </Text>
@@ -242,8 +246,25 @@ export function HomeCategoryBar({
                 scaleTo={0.94}
                 onPress={() => router.push('/rank' as any)}
                 style={[styles.partitionChip, continuous, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="podium-outline" size={13} color={ACCENT} />
-                <Text style={[T.footnote, { color: ACCENT, fontWeight: '600' }]}>完整排行</Text>
+                <Ionicons name="podium-outline" size={13} color={colors.accent} />
+                <Text style={[T.footnote, { color: colors.accent, fontWeight: '600' }]}>完整排行</Text>
+              </Press>
+              {/* 批次5 P2：番剧/影视入口（路由已建好）——追番时间表与番剧索引 */}
+              <Press
+                haptic
+                scaleTo={0.94}
+                onPress={() => router.push('/pgc_timeline' as any)}
+                style={[styles.partitionChip, continuous, { backgroundColor: colors.fill2 }]}>
+                <Ionicons name="calendar-outline" size={13} color={colors.accent} />
+                <Text style={[T.footnote, { color: colors.accent, fontWeight: '600' }]}>追番时间表</Text>
+              </Press>
+              <Press
+                haptic
+                scaleTo={0.94}
+                onPress={() => router.push('/pgc_index' as any)}
+                style={[styles.partitionChip, continuous, { backgroundColor: colors.fill2 }]}>
+                <Ionicons name="filter-outline" size={13} color={colors.accent} />
+                <Text style={[T.footnote, { color: colors.accent, fontWeight: '600' }]}>番剧索引</Text>
               </Press>
             </ScrollView>
           </View>
@@ -317,9 +338,10 @@ const styles = StyleSheet.create({
     left: 0,
     top: 6,
     height: 26,
-    borderRadius: 13,
+    /* 玻璃胶囊指示器（05-B1，原圆角 13 游离于阶梯外 → RADII.circle 胶囊） */
+    borderRadius: RADII.circle,
     ...continuous,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(251,114,153,0.3)',
+    opacity: 0.18,
   },
 });

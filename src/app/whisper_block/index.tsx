@@ -9,6 +9,8 @@ import { useType } from '@/components/type-scale';
 import { RADII, continuous } from '@/theme/tokens';
 import { feedBackSuccess } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 export default function WhisperBlockScreen() {
   const colors = useThemeColors();
@@ -121,23 +123,13 @@ export default function WhisperBlockScreen() {
         {loading ? (
           <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginTop: 40 }} />
         ) : error ? (
-          <View style={styles.emptyWrap}>
-            <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-              <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-            </View>
-            <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>{error}</Text>
-            <Press haptic scaleTo={0.94} onPress={load} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
-              <Text style={[T.subhead, styles.retryText]}>重试</Text>
-            </Press>
-          </View>
+          <ErrorState title={typeof error === 'string' ? error : '加载失败'} onRetry={load} />
         ) : items.length === 0 ? (
-          <View style={styles.emptyWrap}>
-            <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-              <Ionicons name="ban-outline" size={38} color={colors.textTertiary} />
-            </View>
-            <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>还未添加屏蔽词</Text>
-            <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>添加后，将不再接受包含屏蔽词的消息</Text>
-          </View>
+          <EmptyState
+            icon="ban-outline"
+            title="还未添加屏蔽词"
+            subtitle="添加后，将不再接受包含屏蔽词的消息"
+          />
         ) : (
           <View style={styles.chipWrap}>
             {items.map((kw, index) => (
@@ -166,10 +158,4 @@ const styles = StyleSheet.create({
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADII.circle, ...continuous },
   chipText: { fontWeight: '500' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 90, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
-  retryText: { color: '#FFFFFF', fontWeight: '600' },
 });

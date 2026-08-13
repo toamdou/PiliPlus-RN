@@ -225,13 +225,22 @@ public final class PiliNativeCoreModule: Module {
             try await Self.saveImageToPhotos(uri: uri)
         }
 
-        AsyncFunction("startDownloadAsync") { (url: String, destinationPath: String, title: String, pic: String, id: String?) throws -> String in
+        AsyncFunction("startDownloadAsync") { (url: String, destinationPath: String, title: String, pic: String, id: String?, author: String?, bvid: String?, aid: Double?, taskId: String?, partIndex: Double?, partTitle: String?, partCount: Double?, quality: Double?, cid: Double?) throws -> String in
             try PiliDownloadManager.shared.startDownload(
                 urlString: url,
                 destinationPath: destinationPath,
                 title: title,
                 pic: pic,
-                id: id
+                id: id,
+                author: author,
+                bvid: bvid,
+                aid: aid,
+                taskId: taskId,
+                partIndex: partIndex,
+                partTitle: partTitle,
+                partCount: partCount,
+                quality: quality,
+                cid: cid
             )
         }
 
@@ -255,6 +264,14 @@ public final class PiliNativeCoreModule: Module {
 
         AsyncFunction("cancelDownloadAsync") { (id: String) -> Bool in
             PiliDownloadManager.shared.cancelDownload(id: id)
+        }
+
+        AsyncFunction("pauseDownloadAsync") { (id: String) -> Bool in
+            PiliDownloadManager.shared.pauseDownload(id: id)
+        }
+
+        AsyncFunction("resumeDownloadAsync") { (id: String) -> Bool in
+            PiliDownloadManager.shared.resumeDownload(id: id)
         }
 
         AsyncFunction("fetchPendingCompletionsAsync") { () -> [[String: Any]] in

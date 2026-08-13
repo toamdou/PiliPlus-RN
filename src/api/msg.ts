@@ -1,9 +1,11 @@
 import { apiClient, appClient, tClient, msgClient, get, post, getWbi, type RequestConfig } from './client';
 import { Api } from './endpoints';
-import { getCSRF } from '@/utils/cookie';
+import { getCSRF, getAccessKey } from '@/utils/cookie';
 import { FORM_HEADERS, formBody } from '@/utils/form';
 import { uploadBfsFile } from '@/utils/upload-bfs';
 import { toUint8Array } from '@/utils/bytes';
+import { TRACE_ID } from '@/utils/app-sign';
+import { getOrCreateLoginBuvidAsync } from 'pili-native-core';
 import type { NativeRequestCancelToken } from '@/utils/request-cancel';
 
 export type FeedUnreadKey = 'reply' | 'at' | 'like' | 'sys';
@@ -40,6 +42,136 @@ function encodeStringField(field: number, value: string): Uint8Array {
   out.set(head, 0);
   out.set(raw, head.length);
   return out;
+}
+
+function encodeInt32Field(field: number, value: number): Uint8Array {
+  const body = writeVarint(value >>> 0);
+  const head = (field << 3) | 0;
+  const out = new Uint8Array([head, ...body]);
+  return out;
+}
+
+function encodeBytesField(field: number, raw: Uint8Array): Uint8Array {
+  const head = [(field << 3) | 2, ...writeVarint(raw.length)];
+  const out = new Uint8Array(head.length + raw.length);
+  out.set(head, 0);
+  out.set(raw, head.length);
+  return out;
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, p) => sum + p.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+
+/** Uint8Array → base64（不含 padding，对齐 Flutter base64Encode().replaceAll('=','') 的行为由服务端容错） */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/* ===== gRPC 元数据头（R4，对齐 Flutter grpc_headers.dart:23-85） =====
+ * 字段号取自 bilibili/metadata*.proto 的 pbjson descriptor，可手写 varint 编码：
+ *  Device     {app_id:1,build:2,buvid:3,mobi_app:4,platform:5,device:6,channel:7,brand:8,model:9,osver:10,version_name:13}
+ *  Network    {type:1}
+ *  Locale     {c_locale:1(嵌套 LocaleIds{language:1,script:2,region:3}),s_locale:2(同),timezone:4}
+ *  FawkesReq  {appkey:1,env:2,session_id:3}
+ *  Metadata   {access_key:1,mobi_app:2,device:3,build:4,channel:5,buvid:6,platform:7}
+ */
+const GRPC_BUILD = 2001100;
+const GRPC_VERSION_NAME = '2.0.1';
+const GRPC_CHANNEL = 'master';
+const GRPC_MOBI_APP = 'android_hd';
+const GRPC_DEVICE = 'android';
+
+function encodeGrpcDevice(buvid: string): Uint8Array {
+  return concatBytes([
+    encodeInt32Field(1, 5),        // app_id
+    encodeInt32Field(2, GRPC_BUILD), // build
+    encodeStringField(3, buvid),   // buvid
+    encodeStringField(4, GRPC_MOBI_APP), // mobi_app
+    encodeStringField(5, GRPC_DEVICE),   // platform
+    encodeStringField(6, GRPC_DEVICE),   // device
+    encodeStringField(7, GRPC_CHANNEL),  // channel
+    encodeStringField(8, GRPC_DEVICE),   // brand
+    encodeStringField(9, GRPC_DEVICE),   // model
+    encodeStringField(10, '15'),    // osver
+    encodeStringField(13, GRPC_VERSION_NAME), // version_name
+  ]);
+}
+
+function encodeGrpcNetwork(): Uint8Array {
+  return encodeInt32Field(1, 1); // type = WIFI
+}
+
+function encodeGrpcLocale(): Uint8Array {
+  const cLocale = concatBytes([
+    encodeStringField(1, 'zh'),
+    encodeStringField(2, 'Hans'),
+    encodeStringField(3, 'CN'),
+  ]);
+  const sLocale = cLocale;
+  return concatBytes([
+    encodeBytesField(1, cLocale),   // c_locale
+    encodeBytesField(2, sLocale),   // s_locale
+    encodeStringField(4, 'Asia/Shanghai'), // timezone
+  ]);
+}
+
+function encodeGrpcFawkes(sessionId: string): Uint8Array {
+  return concatBytes([
+    encodeStringField(1, GRPC_MOBI_APP), // appkey
+    encodeStringField(2, 'prod'),        // env
+    encodeStringField(3, sessionId),     // session_id
+  ]);
+}
+
+function encodeGrpcMetadata(accessKey: string | undefined, buvid: string): Uint8Array {
+  const parts: Uint8Array[] = [];
+  if (accessKey) parts.push(encodeStringField(1, accessKey));
+  parts.push(encodeStringField(2, GRPC_MOBI_APP));
+  parts.push(encodeStringField(3, GRPC_DEVICE));
+  parts.push(encodeInt32Field(4, GRPC_BUILD));
+  parts.push(encodeStringField(5, GRPC_CHANNEL));
+  parts.push(encodeStringField(6, buvid));
+  parts.push(encodeStringField(7, GRPC_DEVICE));
+  return concatBytes(parts);
+}
+
+function randomAlnum(len: number): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+/** 生成 grpc 请求头：authorization + 6 组 x-bili-*-bin + buvid/trace（对齐 Flutter grpc_headers.newHeaders） */
+async function buildGrpcHeaders(): Promise<Record<string, string>> {
+  const accessKey = getAccessKey();
+  const buvid = await getOrCreateLoginBuvidAsync().catch(() => '');
+  const sessionId = randomAlnum(8);
+  const headers: Record<string, string> = {
+    'buvid': buvid || '',
+    'x-bili-device-bin': bytesToBase64(encodeGrpcDevice(buvid || '')),
+    'x-bili-network-bin': bytesToBase64(encodeGrpcNetwork()),
+    'x-bili-locale-bin': bytesToBase64(encodeGrpcLocale()),
+    'x-bili-fawkes-req-bin': bytesToBase64(encodeGrpcFawkes(sessionId)),
+    'x-bili-metadata-bin': bytesToBase64(encodeGrpcMetadata(accessKey, buvid || '')),
+    'x-bili-exps-bin': '',
+    'x-bili-trace-id': TRACE_ID,
+    'bili-http-engine': 'cronet',
+    'grpc-encoding': 'gzip',
+    'gzip-accept-encoding': 'gzip,identity',
+  };
+  if (accessKey) headers['authorization'] = `identify_v1 ${accessKey}`;
+  return headers;
 }
 
 function frameGrpc(payload: Uint8Array): Uint8Array {
@@ -131,23 +263,24 @@ function decodeKeywordReply(payload: Uint8Array): KeywordBlockingReply {
 }
 
 async function grpcUnary<T>(method: string, payload: Uint8Array): Promise<T> {
+  const headers = await buildGrpcHeaders();
   const res = await post<{ data: ArrayBuffer; headers: Record<string, string> }>(
     appClient,
     `/bilibili.app.im.v1.im/${method}`,
     frameGrpc(payload),
     undefined,
     {
-      headers: { 'Content-Type': 'application/grpc' },
+      headers: { 'Content-Type': 'application/grpc', ...headers },
       responseType: 'arraybuffer',
       rawResponse: true,
     },
   );
-  const headers = res.headers;
-  const status = Object.entries(headers).find(
+  const respHeaders = res.headers;
+  const status = Object.entries(respHeaders).find(
     ([key]) => key.toLowerCase() === 'grpc-status',
   )?.[1];
   if (status && status !== '0') {
-    const message = Object.entries(headers).find(
+    const message = Object.entries(respHeaders).find(
       ([key]) => key.toLowerCase() === 'grpc-message',
     )?.[1];
     throw new Error(message || `grpc status ${status}`);
@@ -344,10 +477,12 @@ export const msgApi = {
     return grpcUnary<KeywordBlockingReply>('KeywordBlockingDelete', encodeStringField(1, keyword));
   },
 
-  // 删除消息feed
+  // 删除消息feed（R8：form + csrf，对齐 Flutter delMsgfeed）
   async delMsgfeed(params: { id: number; type: number }) {
-    return post(apiClient, Api.delMsgfeed, null, {
-      tp: params.type, id: params.id, build: 0, mobi_app: 'web', csrf_token: getCSRF(), csrf: getCSRF(),
+    return post(apiClient, Api.delMsgfeed, formBody({
+      tp: params.type, id: params.id, build: 0, mobi_app: 'web', csrf_token: getCSRF() || '', csrf: getCSRF() || '',
+    }), undefined, {
+      headers: FORM_HEADERS,
     });
   },
 

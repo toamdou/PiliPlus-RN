@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/immutability, react-hooks/refs, react-hooks/purity, react-hooks/preserve-manual-memoization */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useWindowDimensions } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { Gesture } from 'react-native-gesture-handler';
 import {
   runOnJS,
@@ -9,15 +10,14 @@ import {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
-import { videoApi } from '@/api/video';
 import type { VideoShotData } from '@/api/video';
 import type { SBSegment } from '@/api/sponsor-block';
 import type { PlayerTimeControl } from '@/components/video/PlayerTimeProvider';
 import type { VideoInfo } from '@/hooks/use-video-comments';
 import { useScrubBar } from '@/hooks/use-scrub-bar';
 import { usePlayerStore } from '@/stores/player';
-import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
+import { maybeHeartbeat, reportHeartbeatFinal } from '@/utils/heartbeat';
 import { feedBack } from '@/utils/feedback';
 import { formatPlayerTime } from '@/utils/player-utils';
 import { sortSkipSegments } from '@/utils/skip-segments';
@@ -39,6 +39,8 @@ export interface VideoPlaybackOptions {
   autoEnterFullscreenDoneRef: RefObject<boolean>;
   autoEnterFullscreenRef: RefObject<() => void>;
   tryAutoPlay: () => boolean;
+  /** 本页在播放器 store 中的归属路由名（用于记录当前播放源归属，默认 /video/[id]） */
+  sourceScreen?: string;
 }
 
 export function useVideoPlayback(options: VideoPlaybackOptions) {
@@ -54,6 +56,7 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
     autoEnterFullscreenDoneRef,
     autoEnterFullscreenRef,
     tryAutoPlay,
+    sourceScreen = '/video/[id]',
   } = options;
 
   const { width: windowWidth } = useWindowDimensions();
@@ -77,6 +80,9 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
   const isScrubbingRef = useRef(false);
   const seekGuardRef = useRef(0);
   const lastHeartbeatRef = useRef(0);
+  // 01-B1：本页是否已补报过"最终进度"（暂停/卸载只补报一次，避免重复请求）。
+  // 恢复播放时复位，允许下一次暂停再补报。
+  const heartbeatFinalSentRef = useRef(false);
   const hasSeekedRef = useRef(false);
   const [seekThumbnails, setSeekThumbnails] = useState<VideoShotData | null>(null);
   const [showSeekThumb, setShowSeekThumb] = useState(false);
@@ -186,33 +192,24 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
       if (isScrubbingRef.current) return;
       if (Date.now() - seekGuardRef.current < 600) return;
       currentTimeRef.current = e.currentTime;
-      if (
-        useSettingsStore.getState().enableHeartbeat &&
-        !useAuthStore.getState().anonymousMode &&
-        e.currentTime - lastHeartbeatRef.current >= 5 &&
-        infoRef.current
-      ) {
-        lastHeartbeatRef.current = e.currentTime;
-        videoApi.heartbeat({
-          aid: infoRef.current.aid,
-          bvid: infoRef.current.bvid,
-          cid: infoRef.current.cid,
-          played_time: Math.floor(e.currentTime),
-          real_time: Math.floor(e.currentTime),
-          play_type: 0,
-          network_type: 0,
-        }).catch(() => {});
-      }
+      // 01-B1（P0）：心跳 5s→15s，两份实现收敛为 src/utils/heartbeat.ts 单一 util
+      maybeHeartbeat(infoRef.current, e.currentTime, lastHeartbeatRef);
     });
     const playingSub = player.addListener('playingChange', (e: any) => {
       isPlayingRef.current = !!e.isPlaying;
       setIsPlaying(!!e.isPlaying);
+      // 01-B1：暂停即补报一次最终进度（play_type=1），恢复播放后允许再次补报。
       if (e.isPlaying) {
+        heartbeatFinalSentRef.current = false;
         const st = useSettingsStore.getState();
         if (st.enableAutoEnter && videoStartedRef.current && !usePlayerStore.getState().audioMode && !autoEnterFullscreenDoneRef.current) {
           autoEnterFullscreenDoneRef.current = true;
           autoEnterFullscreenRef.current?.();
         }
+      } else if (!heartbeatFinalSentRef.current) {
+        heartbeatFinalSentRef.current = true;
+        const t = currentTimeRef.current || player.currentTime || 0;
+        reportHeartbeatFinal(infoRef.current, t);
       }
     });
     const statusSub = player.addListener('statusChange', (e: any) => {
@@ -241,6 +238,8 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
   }, [autoEnterFullscreenDoneRef, autoEnterFullscreenRef, infoRef, initialSeekTime, player]);
 
   const initialSourceRef = useRef(videoSource);
+  /** 本页源加载 effect 正在 replaceAsync 的目标 playUrl（用于避免与焦点校验重复加载同一源） */
+  const reloadingPlayUrlRef = useRef<string | null>(null);
   useEffect(() => {
     if (initialSourceRef.current && initialSourceRef.current === videoSource) {
       if (!player) return;
@@ -266,12 +265,17 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
     }
     let cancelled = false;
     if (playUrl && player) {
+      // 记录本批 replaceAsync 目标；快速切 P 时旧批结束不得清掉新批的标记
+      const targetUrl = playUrl;
       (async () => {
+        reloadingPlayUrlRef.current = targetUrl;
         try {
           await player.replaceAsync(videoSource!);
         } catch {
+          if (reloadingPlayUrlRef.current === targetUrl) reloadingPlayUrlRef.current = null;
           return;
         }
+        if (reloadingPlayUrlRef.current === targetUrl) reloadingPlayUrlRef.current = null;
         if (cancelled) return;
         const st = useSettingsStore.getState();
         player.playbackRate = playSpeedRef.current || st.defaultPlaySpeed || 1;
@@ -279,13 +283,125 @@ export function useVideoPlayback(options: VideoPlaybackOptions) {
         if (player.duration && player.duration > 0) setDuration(player.duration);
         if (videoStartedRef.current) player.play();
         else tryAutoPlay();
+        // 声明共享播放器源归属（供其他屏返回时校验）
+        const loadedInfo = infoRef.current;
+        if (loadedInfo?.bvid && loadedInfo.cid) {
+          try {
+            usePlayerStore.getState().claimSource({
+              key: `${loadedInfo.bvid}:${loadedInfo.cid}`,
+              bvid: loadedInfo.bvid,
+              cid: loadedInfo.cid,
+              playUrl,
+              screen: sourceScreen,
+              currentTime: player.currentTime || 0,
+            });
+          } catch {}
+        }
       })();
     }
     return () => { cancelled = true; };
-  }, [playUrl, player, tryAutoPlay, videoSource]);
+  }, [infoRef, playUrl, player, sourceScreen, tryAutoPlay, videoSource]);
+
+  /* ===== 共享单例播放器源归属校验（审计 06-N1/V1 修复） =====
+   * PiliPlayer.shared 被 video/pgc/live/download 共用；本页卸载只 pause 不重置源，
+   * 从视频 A push 视频 B 再返回后，A 的源加载 effect 不会重跑（videoSource 未变），
+   * 导致 A 显示 B 的最后一帧/黑屏、点播放播出 B 的内容。
+   * 这里在页面获得焦点时校验：共享播放器当前源（sourceUri）≠ 本页期望源（playUrl）
+   * → 重新 replaceAsync 并恢复该屏最后进度。 */
+  useFocusEffect(
+    useCallback(() => {
+      const currentPlayer = player;
+      const src = videoSource;
+      if (!currentPlayer || !src || !playUrl) return;
+
+      const st = usePlayerStore.getState();
+      // 后台"听视频"模式：共享播放器正被 PiliAudio 占用，绝不能换源
+      if (st.audioMode) return;
+
+      const infoCur = infoRef.current;
+      const ownerKey = infoCur?.bvid && infoCur.cid ? `${infoCur.bvid}:${infoCur.cid}` : '';
+      const claim = (currentTime: number) => {
+        if (!ownerKey || !infoCur?.bvid) return;
+        st.claimSource({
+          key: ownerKey,
+          bvid: infoCur.bvid,
+          cid: infoCur.cid,
+          playUrl,
+          screen: sourceScreen,
+          currentTime,
+        });
+      };
+
+      const loadedUri = (currentPlayer as any).sourceUri ?? null;
+      if (loadedUri === playUrl) {
+        // 共享播放器当前源就是本页源：仅刷新归属声明（含当前进度）
+        try { claim(currentPlayer.currentTime || 0); } catch {}
+        return;
+      }
+
+      // 本页源加载 effect 正在 replaceAsync 同一源（如切 P / 首次取流）→ 交给它，避免双重换源
+      if (reloadingPlayUrlRef.current === playUrl) return;
+
+      // 源被其他屏 replaceAsync 劫持（或为空）：重新加载本页源并恢复进度
+      const saved = st.getScreenProgress(ownerKey);
+      try { claim(saved?.currentTime ?? 0); } catch {}
+      let cancelled = false;
+      (async () => {
+        try {
+          await currentPlayer.replaceAsync(src);
+        } catch {
+          return;
+        }
+        if (cancelled) return;
+        // 全屏退出桥接（use-video-controller 的 fullscreenState）会同步进度 seek，
+        // 此时跳过本地进度恢复，避免用进入全屏时的旧时间覆盖退出时的新时间
+        if (!usePlayerStore.getState().fullscreenState) {
+          const savedProgress = usePlayerStore.getState().getScreenProgress(ownerKey);
+          if (savedProgress && savedProgress.currentTime > 0) {
+            try { currentPlayer.currentTime = savedProgress.currentTime; } catch {}
+          }
+        }
+        const settings = useSettingsStore.getState();
+        try { currentPlayer.playbackRate = playSpeedRef.current || settings.defaultPlaySpeed || 1; } catch {}
+        try { currentPlayer.volume = Math.min(Math.max((settings.playerVolume ?? 100) / 100, 0), 1); } catch {}
+        if (player.duration && player.duration > 0) setDuration(player.duration);
+        if (videoStartedRef.current) currentPlayer.play();
+        else tryAutoPlay();
+        try { claim(currentPlayer.currentTime || 0); } catch {}
+      })();
+
+      return () => {
+        cancelled = true;
+        // blur/卸载：记录本屏最后进度（仅当共享播放器确实还载着本页源时）
+        try {
+          if ((currentPlayer as any).sourceUri === playUrl) {
+            st.saveScreenProgress(ownerKey, {
+              currentTime: currentPlayer.currentTime || 0,
+              duration: currentPlayer.duration || 0,
+              playbackRate: currentPlayer.playbackRate || 1,
+            });
+          }
+        } catch {}
+      };
+    }, [infoRef, player, playUrl, sourceScreen, tryAutoPlay, videoSource]),
+  );
 
   useEffect(() => () => {
     if (seekHudTimerRef.current) clearTimeout(seekHudTimerRef.current);
+  }, []);
+
+  // 01-B1：卸载时补报一次最终进度（play_type=1，截至当前真实时间）。
+  // 若已在暂停时补报过（heartbeatFinalSentRef），则不重复上报。
+  useEffect(() => {
+    return () => {
+      try {
+        if (!heartbeatFinalSentRef.current) {
+          heartbeatFinalSentRef.current = true;
+          reportHeartbeatFinal(infoRef.current, currentTimeRef.current);
+        }
+      } catch {}
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scrubPreview = useCallback((t: number) => {

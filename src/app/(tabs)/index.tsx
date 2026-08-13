@@ -21,6 +21,7 @@ import { type VideoItem } from '@/components/video/VideoCard';
 import { HomeFeedList } from '@/components/home/HomeFeedList';
 import { HomeCategoryBar } from '@/components/home/HomeCategoryBar';
 import { useRcmdFeed } from '@/hooks/use-rcmd-feed';
+import ErrorState from '@/components/ErrorState';
 
 /* 顶栏隐藏弹簧：临界阻尼（不 overshoot）、约 300ms 快速收敛。 */
 const HIDE_SPRING: WithSpringConfig = { duration: 300, dampingRatio: 1 };
@@ -63,6 +64,7 @@ export default function HomeScreen() {
     loading,
     refreshing,
     loadingMore,
+    error,
     activeCategory,
     activePartitionIdx,
     selectCategory,
@@ -173,6 +175,19 @@ export default function HomeScreen() {
         onDisliked={handleDisliked}
       />
 
+      {/* H1：首屏失败静默空态 → 统一 ErrorState + 重试。
+          "保留刷新"逻辑：若已加载到缓存旧数据（videos 非空），仍正常展示不遮罩；
+          重试走 fetchVideos(true)，复用既有刷新链路（含低电量门控预取）。 */}
+      {!loading && error && videos.length === 0 && (
+        <View style={styles.errorOverlay}>
+          <ErrorState
+            title="推荐加载失败"
+            message="网络似乎开小差了，请检查后重试"
+            onRetry={() => fetchVideos(true)}
+          />
+        </View>
+      )}
+
       <GlassSearchBar
         hideProgress={hideProgress}
         avatarUri={userInfo?.face}
@@ -180,7 +195,15 @@ export default function HomeScreen() {
         unreadCount={unreadCount}
         badgeMode={msgBadgeMode}
         onSearchPress={() => router.push('/search' as any)}
-        onAvatarPress={() => router.push(`/member/${userInfo?.mid || 0}` as any)}
+        onAvatarPress={() => {
+          /* H2：未登录 / mid 无效时不再跳 /member/0，改引导去登录 */
+          const mid = userInfo?.mid || 0;
+          if (mid <= 0) {
+            router.push('/login' as any);
+            return;
+          }
+          router.push(`/member/${mid}` as any);
+        }}
         onBellPress={() => router.push('/notifications' as any)}
         topInset={insets.top}
       />
@@ -200,5 +223,14 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+  },
+  /* H1 错误态遮罩：覆盖整个列表区域，避免与悬浮搜索栏/分类栏重叠 */
+  errorOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 5,
   },
 });

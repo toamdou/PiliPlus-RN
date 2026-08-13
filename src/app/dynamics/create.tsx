@@ -1,9 +1,12 @@
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Stack } from 'expo-router';
+import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { useType } from '@/components/type-scale';
 import { Press } from '@/components/motion';
+import EmotePicker from '@/components/emote/EmotePicker';
 import { MentionPicker } from '@/components/dynamics/MentionPicker';
 import { TopicPicker } from '@/components/dynamics/TopicPicker';
 import { VoteEditor } from '@/components/dynamics/VoteEditor';
@@ -18,6 +21,8 @@ export default function CreateDynamicScreen() {
   const colors = useThemeColors();
   const T = useType();
   const insets = useSafeAreaInsets();
+  // 表情面板开关（emote 体系接入：发布动态输入框支持 [xxx] 表情）
+  const [showEmote, setShowEmote] = useState(false);
   const {
     isEditing,
     text,
@@ -124,20 +129,33 @@ export default function CreateDynamicScreen() {
 
               <ImagePickerRow images={images} max={MAX_IMAGES} onAdd={pickImages} onRemove={removeImage} />
 
-              <CreateDynToolbar
-                topicActive={Boolean(topic) || topicPanelOpen}
-                mentionActive={mentionKeyword !== null}
-                voteActive={Boolean(voteDraft) || voteOpen}
-                reserveActive={Boolean(reserveDraft) || reserveOpen}
-                onPickImages={pickImages}
-                onToggleTopic={toggleTopicPanel}
-                onInsertAt={insertAt}
-                onToggleVote={toggleVoteEditor}
-                onToggleReserve={toggleReserveEditor}
-              />
+              <View style={styles.toolbarRow}>
+                <CreateDynToolbar
+                  topicActive={Boolean(topic) || topicPanelOpen}
+                  mentionActive={mentionKeyword !== null}
+                  voteActive={Boolean(voteDraft) || voteOpen}
+                  reserveActive={Boolean(reserveDraft) || reserveOpen}
+                  onPickImages={pickImages}
+                  onToggleTopic={toggleTopicPanel}
+                  onInsertAt={insertAt}
+                  onToggleVote={toggleVoteEditor}
+                  onToggleReserve={toggleReserveEditor}
+                />
+                {/* 表情按钮（EmotePicker 表情面板切换） */}
+                <Press haptic scaleTo={0.94} onPress={() => setShowEmote((v) => !v)} style={styles.emoteBtn}>
+                  <Ionicons name="happy-outline" size={22} color={showEmote ? ACCENT : colors.textSecondary} />
+                </Press>
+              </View>
             </>
           ) : null}
         </ScrollView>
+
+        {/* 表情面板：onSelect 把 [xxx] 文本码拼进动态文本 */}
+        <EmotePicker
+          visible={showEmote}
+          onSelect={(code) => onTextChange(text + code)}
+          onClose={() => setShowEmote(false)}
+        />
 
         <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
           <Press
@@ -166,4 +184,7 @@ const styles = StyleSheet.create({
     ...continuous,
   },
   publishText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  /* 工具栏行：表情按钮与既有 CreateDynToolbar 同排 */
+  toolbarRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  emoteBtn: { padding: 8 },
 });

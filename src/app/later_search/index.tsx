@@ -17,6 +17,8 @@ import { formatDuration } from '@/utils/format';
 import { showToast } from '@/utils/toast';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const rowLayout = fixedItemLayout(106);
 
@@ -110,12 +112,14 @@ export default function LaterSearchScreen() {
       <View style={[styles.root, { backgroundColor: colors.bg }]}>
         <Stack.Title large>稍后再看搜索</Stack.Title>
         <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
-        <View style={styles.emptyWrap}>
-          <Text style={[T.headline, { color: colors.text }]}>请先登录</Text>
+        <EmptyState
+          icon="lock-closed-outline"
+          title="请先登录"
+          subtitle="登录后可使用稍后再看搜索">
           <Press haptic scaleTo={0.94} onPress={() => router.push('/login' as any)} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
             <Text style={[T.subhead, styles.retryText]}>去登录</Text>
           </Press>
-        </View>
+        </EmptyState>
       </View>
     );
   }
@@ -145,30 +149,14 @@ export default function LaterSearchScreen() {
         onEndReachedThreshold={0.4}
         estimatedItemSize={106}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={loadingMore ? <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginVertical: 14 }} /> : null}
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text }]}>{error}</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
-                <Text style={[T.subhead, styles.retryText]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState title={typeof error === 'string' ? error : '加载失败'} onRetry={refresh} />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="search-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text }]}>输入关键词搜索稍后再看</Text>
-            </View>
+            <EmptyState icon="search-outline" title="输入关键词搜索稍后再看" />
           )
         }
         renderItem={renderItem}
@@ -195,8 +183,6 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: 6, justifyContent: 'center' },
   title: { fontWeight: '600' },
   removeBtn: { padding: 8, alignSelf: 'center' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   retryBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
   retryText: { color: '#FFFFFF', fontWeight: '600' },
   skeletonCard: { position: 'absolute', top: 0, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 8, gap: 4, ...continuous },

@@ -50,6 +50,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { feedBack, feedBackSuccess, feedBackMedium, openInAppBrowser } from '@/utils/feedback';
 import { usePagedList } from '@/hooks/use-paged-list';
 import type { NativeRequestCancelToken } from '@/utils/request-cancel';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 import { SkeletonRow } from '@/components/Skeleton';
 import { showToast } from '@/utils/toast';
 import { RADII, continuous } from '@/theme/tokens';
@@ -471,26 +473,18 @@ export default function PgcReviewSection({ mediaId, seasonTitle }: { mediaId: nu
               <SkeletonRow height={44} />
             </View>
           ) : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>网络开小差了，试试重新加载</Text>
-              <Press haptic scaleTo={0.94} onPress={handleRefresh} style={styles.retryBtn}>
-                <Text style={[T.subhead, styles.retryBtnText]}>重新加载</Text>
-              </Press>
-            </View>
+            <ErrorState
+              title="加载失败"
+              message="网络开小差了，试试重新加载"
+              onRetry={handleRefresh}
+              retryLabel="重新加载"
+            />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="chatbubble-ellipses-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无点评</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>
-                {isLong ? '还没有长评，来写第一篇吧' : '还没有短评，来写第一篇吧'}
-              </Text>
-            </View>
+            <EmptyState
+              icon="chatbubble-ellipses-outline"
+              title="暂无点评"
+              subtitle={isLong ? '还没有长评，来写第一篇吧' : '还没有短评，来写第一篇吧'}
+            />
           )
         }
         ListFooterComponent={
@@ -539,11 +533,4 @@ const styles = StyleSheet.create({
   likeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 6 },
   likeCount: { fontWeight: '600' },
   reviewSkeleton: { gap: 14, paddingTop: 16 },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10 },
-  retryBtnText: { color: '#FFFFFF', fontWeight: '600' },
 });

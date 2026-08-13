@@ -1,9 +1,10 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors } from '@/components/SwiftUIHost';
 import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
+import { BILI } from '@/theme/bili-colors';
 import { formatCount } from '@/utils/format';
 import { RADII, continuous, shadow } from '@/theme/tokens';
 import type { SeasonDetail } from './pgc-types';
@@ -44,7 +45,8 @@ export function PgcInfoHeader({
           <Text style={[T.headline, styles.title, { color: colors.text }]} numberOfLines={2}>{detail.title}</Text>
           {detail.rating.score > 0 ? (
             <View style={styles.ratingRow}>
-              <Ionicons name="star" size={14} color="#FF9500" />
+              {/* 评分星星：运营星级 token（05-B13，原 #FF9500 硬编码 → BILI.star） */}
+              <Ionicons name="star" size={14} color={BILI.star} />
               <Text style={[T.subhead, styles.ratingScore]}>{detail.rating.score.toFixed(1)}</Text>
               <Text style={[T.caption2, styles.ratingCount, { color: colors.textTertiary }]}>{`(${formatCount(detail.rating.count)}人评)`}</Text>
             </View>
@@ -54,7 +56,7 @@ export function PgcInfoHeader({
           </Text>
           {detail.new_ep?.index_show ? (
             <View style={styles.newEpRow}>
-              <View style={styles.newEpTag}>
+              <View style={[styles.newEpTag, { backgroundColor: colors.accent }]}>
                 <Ionicons name="sparkles" size={11} color="#FFFFFF" />
                 <Text style={styles.newEpTagText}>更新</Text>
               </View>
@@ -76,7 +78,7 @@ export function PgcInfoHeader({
             haptic
             scaleTo={0.94}
             onPress={onToggleFollow}
-            style={[styles.followBtn, followStatus > 0 ? { backgroundColor: colors.fill2 } : { backgroundColor: ACCENT }]}>
+            style={[styles.followBtn, followStatus > 0 ? { backgroundColor: colors.fill2 } : { backgroundColor: colors.accent }]}>
             <Ionicons name={followStatus > 0 ? 'checkmark' : 'add'} size={15} color={followStatus > 0 ? colors.textSecondary : '#FFFFFF'} />
             <Text style={[T.footnote, styles.followText, { color: followStatus > 0 ? colors.textSecondary : '#FFFFFF' }]}>
               {followStatus === 1 ? '想看' : followStatus === 2 ? '已追' : followStatus === 3 ? '已看完' : '追番'}
@@ -96,13 +98,13 @@ export function PgcInfoHeader({
       {/* 互动栏 */}
       <View style={[styles.actionBar, { backgroundColor: colors.card }, shadow('md', colors.isDark)]}>
         <Press haptic scaleTo={0.9} onPress={onLike}>
-          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? ACCENT : colors.textSecondary} />
+          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? colors.accent : colors.textSecondary} />
         </Press>
         <Press haptic scaleTo={0.9} onPress={onCoin}>
-          <Ionicons name="logo-bitcoin" size={20} color={coined ? ACCENT : colors.textSecondary} />
+          <Ionicons name="logo-bitcoin" size={20} color={coined ? colors.accent : colors.textSecondary} />
         </Press>
         <Press haptic scaleTo={0.9} onPress={onFav}>
-          <Ionicons name={faved ? 'star' : 'star-outline'} size={20} color={faved ? '#FFD700' : colors.textSecondary} />
+          <Ionicons name={faved ? 'star' : 'star-outline'} size={20} color={faved ? BILI.star : colors.textSecondary} />
         </Press>
         <Press haptic scaleTo={0.9} onPress={onShare}>
           <Ionicons name="share-outline" size={20} color={colors.textSecondary} />
@@ -118,11 +120,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row', gap: 14, padding: 14, borderRadius: RADII.lg, marginTop: 12,
     ...continuous,
   },
-  cover: { width: 100, height: 133, borderRadius: 12, ...continuous },
+  cover: { width: 100, height: 133, borderRadius: RADII.thumb, ...continuous },
   infoBody: { flex: 1, gap: 7 },
   title: { fontWeight: '800', lineHeight: 22 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  ratingScore: { fontWeight: '700', color: '#FF9500' },
+  ratingScore: { fontWeight: '700', color: BILI.star },
   ratingCount: { marginLeft: 2 },
   stat: {},
   newEpRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -130,15 +132,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: ACCENT,
-    borderRadius: 5,
+    borderRadius: RADII.xs,
     paddingHorizontal: 5,
     paddingVertical: 2,
   },
   newEpTagText: { color: '#FFFFFF', fontSize: 9.5, fontWeight: '700' },
   newEpText: { flexShrink: 1 },
   tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  tag: { paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6 },
+  /* 标签圆角收敛到 RADII.xs（05-B13，原 6 硬编码） */
+  tag: { paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: RADII.xs },
   tagText: { fontSize: 10.5 },
   followBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 18, paddingVertical: 8, borderRadius: RADII.card, marginTop: 2, ...continuous },
   followText: { fontWeight: '700' },

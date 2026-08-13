@@ -4,6 +4,9 @@ import { configureNetworkAsync, getSettingsSnapshotAsync, setSettingsSnapshotAsy
 import { buildNativeNetworkSettings } from '@/utils/native-network-settings';
 
 const WEBDAV_PASSWORD_KEY = 'settings.webdavPassword';
+// 01-T2（P2）：旧版 AsyncStorage 逐 key 设置迁移完成的标记键。
+// 置位后 init 不再跑 getKeysByPrefix 扫描（新用户首启只执行一次）。
+const MIGRATION_MARKER_KEY = 'settings.migrated';
 let settingsPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 export interface SettingsState {
@@ -53,6 +56,8 @@ export interface SettingsState {
   preferCodec: string;
   bufferSize: number;
   bufferSec: number;
+  /** 画面填充模式：contain=等比适应（完整显示）cover=等比填充（裁剪边缘）fill=拉伸铺满 */
+  videoGravity: 'contain' | 'cover' | 'fill';
 
   // ===== 播放 =====
   autoPlay: boolean;
@@ -108,6 +113,25 @@ export interface SettingsState {
   mergeDanmaku: boolean;
   showDmChart: boolean;
   enableTapDm: boolean;
+  // 批次5 P1 弹幕设置补齐（02-2.3 弹幕设置面板）：
+  /** 弹幕显示区域占播放器弹幕层高度的比例（0~1，原生 PiliDanmakuOverlayView 按此收敛轨道区域） */
+  dmArea: number;
+  /** 描边粗细（pt，0=不描边；原生走 NSAttributedString strokeWidth 真描边） */
+  dmStrokeWidth: number;
+  /** 描边颜色（hex，如 #000000） */
+  dmStrokeColor: string;
+  /** 顶部/底部静态弹幕停留秒数（preparer staticDuration） */
+  dmStaticDuration: number;
+  /** 按类型屏蔽：滚动弹幕 */
+  dmBlockScroll: boolean;
+  /** 按类型屏蔽：顶部弹幕 */
+  dmBlockTop: boolean;
+  /** 按类型屏蔽：底部弹幕 */
+  dmBlockBottom: boolean;
+  /** 按类型屏蔽：彩色弹幕（命中后强制转为白色，对齐 Flutter blockColorful 语义） */
+  dmBlockColorful: boolean;
+  /** 智能云屏蔽级别（0~11，对齐 Flutter danmakuWeight；当前解析器未提取 weight 字段，暂不支持，仅保留字段） */
+  dmCloudLevel: number;
 
   // ===== 内容显示 =====
   showViewPoints: boolean;
@@ -196,6 +220,16 @@ export interface SettingsState {
   subtitlePaddingB: number;
   subtitleBgOpacity: number;
 
+  // ===== 画中画（批次5 P3） =====
+  /** 后台画中画：进入后台时自动开启系统画中画（原生需要 com.apple.developer.avfoundation.picture-in-picture entitlement，真机验收项） */
+  enablePiP: boolean;
+  /** 画中画不加载弹幕：PiP 小窗激活时暂停弹幕层渲染，避免小窗内弹幕干扰 */
+  enablePiPNoDanmaku: boolean;
+
+  // ===== 界面缩放（批次5 P3） =====
+  /** 界面缩放系数（uiScale）：全局字阶整体缩放，对齐 Flutter style_settings uiScale */
+  uiScale: number;
+
   // ===== 缓存 =====
   maxCacheSize: number; // MB
 
@@ -254,7 +288,12 @@ const defaults = {
   disableAudioCDN: false,
   preferCodec: 'avc',
   bufferSize: 32,
-  bufferSec: 60,
+  // 01-M1/S3（P0）：前向缓冲默认 60s 过高——1080p 峰值 6Mbps 下约 45MB 驻留。
+  // 降到 15s（≈11MB）后，配合蜂窝默认 720p（8~10s 档），显著降低峰值内存。
+  bufferSec: 15,
+  // 04-B3/B4（P1）：画面比例/填充模式，默认等比适应（contain）。
+  // 原生 PiliPlayerView.setVideoGravity 已支持 contain/cover/fill 三档，此处补持久化字段。
+  videoGravity: 'contain' as const,
 
   autoPlay: true,
   playOnWifi: false,
@@ -307,6 +346,15 @@ const defaults = {
   mergeDanmaku: false,
   showDmChart: false,
   enableTapDm: true,
+  dmArea: 0.5,
+  dmStrokeWidth: 1.5,
+  dmStrokeColor: '#000000',
+  dmStaticDuration: 4,
+  dmBlockScroll: false,
+  dmBlockTop: false,
+  dmBlockBottom: false,
+  dmBlockColorful: false,
+  dmCloudLevel: 0,
 
   showViewPoints: true,
   showRelatedVideo: true,
@@ -366,7 +414,9 @@ const defaults = {
   expandDynLivePanel: false,
   dynamicBadgeMode: 0,
 
-  enableHttp2: false,
+  // 01-B3（P2）：enableHttp2 默认开启，减少与 B 站服务器的 TLS 握手次数与耗电；
+  // 原生 PiliNetwork.applyNetworkSettings 已支持（httpShouldUsePipelining）。
+  enableHttp2: true,
   badCertificateCallback: false,
   retryCount: 3,
   retryDelay: 500,
@@ -396,6 +446,13 @@ const defaults = {
   subtitlePaddingH: 24,
   subtitlePaddingB: 24,
   subtitleBgOpacity: 0.67,
+
+  // 批次5 P3：画中画设置默认值。enablePiP 默认关（需要 entitlement 真机验收）；
+  // enablePiPNoDanmaku 默认开（PiP 小窗内弹幕基本不可读）。
+  enablePiP: false,
+  enablePiPNoDanmaku: true,
+  // 批次5 P3：界面缩放默认 1.0（不缩放），由 type-scale 全局字阶消费。
+  uiScale: 1.0,
 
   maxCacheSize: 512,
 
@@ -460,6 +517,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     }
     const snapshot = await storage.getJSON<Partial<SettingsState>>('settings');
+    // 01-T2（P2）：旧版 AsyncStorage 迁移兜底加"已迁移"标记短路。
+    // 老用户迁移完成后标记置位，新用户首启即便快照为空也只跑一次迁移，
+    // 不再每次启动都执行昂贵的 getKeysByPrefix 扫描（getKeysByPrefix 会走
+    // nativeGetKeysByPrefixAsync 全量 UserDefaults 过滤 + AsyncStorage.getAllKeys）。
+    const migrated = await storage.get(MIGRATION_MARKER_KEY);
+    if (migrated !== null) {
+      // 迁移完成后 'settings' 键已被删除，snapshot 正常应为 null；
+      // 防御性处理：即使残留也按迁移路径提取 webdavPassword 到 SecureStore。
+      if (snapshot) {
+        const record = snapshot as Record<string, unknown>;
+        const legacyPassword = record.webdavPassword;
+        delete record.webdavPassword;
+        if (typeof legacyPassword === 'string' && legacyPassword !== '') {
+          await secureStorage.set(WEBDAV_PASSWORD_KEY, legacyPassword);
+        }
+        get().hydrate(record as Partial<SettingsState>);
+      }
+      syncNativeNetworkConfig(get());
+      return;
+    }
     const keys = await storage.getKeysByPrefix('settings.');
     const entries = keys.length > 0 ? await storage.getMany(keys) : {};
     const merged: Partial<SettingsState> = { ...(snapshot ?? {}) };
@@ -496,6 +573,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     for (const key of keys) {
       await storage.remove(key).catch(() => {});
     }
+    // 01-T2（P2）：迁移完成置位标记，下次启动短路 getKeysByPrefix 扫描。
+    await storage.set(MIGRATION_MARKER_KEY, '1').catch(() => {});
   },
 
   set: (partial) => {

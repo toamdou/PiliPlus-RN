@@ -14,6 +14,7 @@ import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RADII, continuous } from '@/theme/tokens';
+import EmptyState from '@/components/EmptyState';
 
 interface Rule { id: number; filter: string; }
 
@@ -181,23 +182,15 @@ export default function DanmakuBlockScreen() {
           contentContainerStyle={[styles.listContent, isLoggedIn && activeRules.length > 0 && { backgroundColor: colors.card, borderRadius: RADII.lg, marginHorizontal: 14, marginTop: 10, ...continuous }]}
           showsVerticalScrollIndicator={false}
           estimatedItemSize={52}
-          windowSize={9}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
+          drawDistance={250}
           overrideProps={{ initialDrawBatchSize: 10 }}
           ListEmptyComponent={
             loading ? null : (
-              <View style={styles.emptyWrap}>
-                <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                  <Ionicons name={isLoggedIn ? 'ban' : 'lock-closed'} size={36} color={colors.textTertiary} />
-                </View>
-                <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>
-                  {isLoggedIn ? '暂无屏蔽规则' : '请先登录'}
-                </Text>
-                <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>
-                  {isLoggedIn ? `添加${TABS[activeTab].label}规则，净化弹幕环境` : '登录后可管理弹幕屏蔽'}
-                </Text>
-              </View>
+              <EmptyState
+                icon={isLoggedIn ? 'ban' : 'lock-closed'}
+                title={isLoggedIn ? '暂无屏蔽规则' : '请先登录'}
+                subtitle={isLoggedIn ? `添加${TABS[activeTab].label}规则，净化弹幕环境` : '登录后可管理弹幕屏蔽'}
+              />
             )
           }
           renderItem={renderRule}
@@ -246,11 +239,7 @@ const styles = StyleSheet.create({
   ruleIconBox: { width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
   ruleText: { flex: 1 },
   delBtn: { padding: 4 },
-  /* 空态 / 加载 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 90, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
+  /* 加载 */
   loadingWrap: { paddingTop: 90, alignItems: 'center' },
   /* 添加栏 */
   inputBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },

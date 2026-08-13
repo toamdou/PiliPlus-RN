@@ -20,6 +20,8 @@ import { RADII, continuous } from '@/theme/tokens';
 import { VideoCard, cellHeightFor, type VideoItem } from '@/components/video/VideoCard';
 import { type FlashListItemLayout } from '@/utils/list-layout';
 import { feedBackMedium } from '@/utils/feedback';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 interface RankItem extends VideoItem {
   rank: number;
@@ -218,9 +220,6 @@ export default function RankScreen() {
         estimatedItemSize={220}
         overrideItemLayout={overrideItemLayout}
         getItemType={getItemType}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListEmptyComponent={
@@ -229,19 +228,9 @@ export default function RankScreen() {
               <Host matchContents><ProgressView /></Host>
             </View>
           ) : failed ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-              <Press haptic scaleTo={0.94} onPress={() => load(activeIdx)} style={styles.retryBtn}>
-                <Text style={[T.subhead, { color: '#FFFFFF', fontWeight: '600' }]}>重新加载</Text>
-              </Press>
-            </View>
+            <ErrorState title="加载失败" onRetry={() => load(activeIdx)} retryLabel="重新加载" />
           ) : (
-            <View style={styles.emptyWrap}>
-              <Text style={[T.footnote, { color: colors.textTertiary }]}>暂无榜单数据</Text>
-            </View>
+            <EmptyState title="暂无榜单数据" />
           )
         }
         renderItem={renderItem}
@@ -271,8 +260,4 @@ const styles = StyleSheet.create({
   },
   rankBadgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
   loadingWrap: { height: 260, justifyContent: 'center', alignItems: 'center' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 120, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  emptyTitle: { fontWeight: '600' },
-  retryBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10 },
 });

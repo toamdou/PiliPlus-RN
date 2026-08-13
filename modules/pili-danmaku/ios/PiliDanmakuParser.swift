@@ -95,7 +95,9 @@ enum PiliDanmakuParser {
             }
         }
 
-        guard let mode, mode == 1 || mode == 4 || mode == 5 else {
+        // 批次5 P1：放开 mode 白名单到 1~7。mode 2/3（滚动）、6/7（顶部）此前被丢弃，
+        // 现由 Preparer 重新归类到 scroll/top/bottom 三类渲染（04-B6①）。
+        guard let mode, mode >= 1, mode <= 7 else {
             return nil
         }
 
@@ -256,9 +258,10 @@ private final class PiliXmlDanmakuParser: NSObject, XMLParserDelegate {
         params = nil
         text = ""
 
+        // 批次5 P1：同 protobuf 路径，保留 1~7 全部 mode，交由 Preparer 归类渲染。
         guard let time = legacyParseDouble(currentParams.element(at: 0)),
               let mode = legacyParseInt(currentParams.element(at: 1)),
-              mode == 1 || mode == 4 || mode == 5 else {
+              mode >= 1, mode <= 7 else {
             return
         }
 

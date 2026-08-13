@@ -19,6 +19,8 @@ import { feedBackMedium, feedBackSuccess } from '@/utils/feedback';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
 import { NativeBottomSheet } from '@/components/NativeBottomSheet';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const rowLayout = fixedItemLayout(72);
 
@@ -265,28 +267,15 @@ export default function FollowScreen() {
     if (loading) return null;
     if (error) {
       return (
-        <View style={styles.emptyWrap}>
-          <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-          </View>
-          <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-          <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>网络开小差了，请重试</Text>
-          <Press haptic scaleTo={0.94} onPress={refresh} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
-            <Text style={[T.subhead, styles.retryText]}>重试</Text>
-          </Press>
-        </View>
+        <ErrorState title="加载失败" message="网络开小差了，请重试" onRetry={refresh} />
       );
     }
     return (
-      <View style={styles.emptyWrap}>
-        <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-          <Ionicons name="people-outline" size={38} color={colors.textTertiary} />
-        </View>
-        <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无数据</Text>
-        <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>
-          {isTag ? '该分组还没有用户' : isFollowing ? '还没有关注任何人' : '还没有粉丝'}
-        </Text>
-      </View>
+      <EmptyState
+        icon="people-outline"
+        title="暂无数据"
+        subtitle={isTag ? '该分组还没有用户' : isFollowing ? '还没有关注任何人' : '还没有粉丝'}
+      />
     );
   };
 
@@ -370,9 +359,6 @@ export default function FollowScreen() {
             onEndReachedThreshold={0.4}
             estimatedItemSize={72}
             overrideItemLayout={rowLayout}
-            windowSize={9}
-            initialNumToRender={10}
-            maxToRenderPerBatch={12}
             drawDistance={250}
             overrideProps={{ initialDrawBatchSize: 10 }}
             ItemSeparatorComponent={RowSeparator}
@@ -419,13 +405,6 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: 3 },
   name: { fontWeight: '600' },
   sign: {},
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
-  retryText: { color: '#FFFFFF', fontWeight: '600' },
   /* 骨架 */
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
   /* 移入分组选择器 */

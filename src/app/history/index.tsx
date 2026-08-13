@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
-import { View, Text, StyleSheet, RefreshControl, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, RefreshControl, ActivityIndicator, Alert, LayoutAnimation } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Stack, useRouter, Link, useScrollToTop } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useReducedMotion } from 'react-native-reanimated';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { favApi } from '@/api/fav';
 import { videoApi } from '@/api/video';
@@ -18,6 +19,22 @@ import { feedBackMedium, feedBackSuccess } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
 import { biliCover } from '@/utils/image-url';
 import { SkeletonMediaRow } from '@/components/Skeleton';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
+
+/* 行删除收缩动画（05-C3 列表删除规范：高度收缩 250ms + opacity 后再移除数据）。
+   FlashList 2.0.2 无 removingItem prop（该接口为 1.x 旧版），
+   改用 LayoutAnimation.configureNext 触发 RN 布局动画 + FlashList 的
+   prepareForLayoutAnimationRender() 关闭回收池避免动画错位。 */
+function animateRowDelete(reduced: boolean) {
+  if (reduced) return; // 系统"减弱动态效果"时跳过动画，直接移除
+  LayoutAnimation.configureNext({
+    duration: 250,
+    create: { type: 'easeInEaseOut', property: 'opacity' },
+    update: { type: 'easeInEaseOut' },
+    delete: { type: 'easeInEaseOut', property: 'opacity' },
+  });
+}
 
 interface HistoryItem {
   title: string;
@@ -98,6 +115,7 @@ export default function HistoryScreen() {
   const router = useRouter();
   const colors = useThemeColors();
   const T = useType();
+  const reducedMotion = useReducedMotion();
   const { isLoggedIn } = useAuthStore();
   const [typeFilter, setTypeFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
@@ -107,7 +125,7 @@ export default function HistoryScreen() {
   useScrollToTop(listRef);
   const cursorRef = useRef<{ max: number; view_at: number }>({ max: 0, view_at: 0 });
 
-  const { items, loading, refreshing, loadingMore, refresh, loadMore, setItems } = usePagedList<HistoryItem>({
+  const { items, loading, refreshing, loadingMore, error, refresh, loadMore, setItems } = usePagedList<HistoryItem>({
     enabled: isLoggedIn,
     fetchPage: async (page, cancelToken) => {
       const params = page === 1 ? {} : { max: cursorRef.current.max, view_at: cursorRef.current.view_at };
@@ -155,12 +173,15 @@ export default function HistoryScreen() {
   const removeItem = useCallback(async (item: HistoryItem) => {
     try {
       await favApi.delHistory({ kid: `${item.history.business}_${item.history.oid}` });
+      // 收缩动画：先配置 250ms 高度+透明度布局动画，并关闭回收池，再移除数据
+      animateRowDelete(reducedMotion);
+      listRef.current?.prepareForLayoutAnimationRender?.();
       setItems((prev) => prev.filter((x) => x !== item));
       feedBackSuccess();
     } catch {
       showToast('删除失败');
     }
-  }, [setItems]);
+  }, [setItems, reducedMotion]);
 
   const clearAll = useCallback(() => {
     Alert.alert('清空历史记录', '确定清空全部观看历史吗？', [
@@ -171,6 +192,8 @@ export default function HistoryScreen() {
         onPress: async () => {
           try {
             await favApi.clearHistory();
+            animateRowDelete(reducedMotion);
+            listRef.current?.prepareForLayoutAnimationRender?.();
             setItems([]);
             feedBackSuccess();
           } catch {
@@ -179,7 +202,7 @@ export default function HistoryScreen() {
         },
       },
     ]);
-  }, [setItems]);
+  }, [setItems, reducedMotion]);
 
   const togglePause = useCallback(async () => {
     const next = !paused;
@@ -203,22 +226,17 @@ export default function HistoryScreen() {
 
 
 
-  /* 未登录空态 */
+  /* 未登录空态（共享 EmptyState + 去登录 children） */
   if (!isLoggedIn) {
     return (
       <View style={[styles.root, { backgroundColor: colors.bg }]}>
         <Stack.Title large>历史记录</Stack.Title>
         <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
-        <View style={styles.emptyWrap}>
-          <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="person-circle-outline" size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>请先登录</Text>
-          <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>登录后查看观看历史</Text>
+        <EmptyState icon="person-circle-outline" title="请先登录" subtitle="登录后查看观看历史">
           <Press haptic scaleTo={0.94} onPress={() => router.push('/login' as any)} style={styles.loginBtn}>
             <Text style={[T.subhead, styles.loginBtnText]}>去登录</Text>
           </Press>
-        </View>
+        </EmptyState>
       </View>
     );
   }
@@ -273,16 +291,13 @@ export default function HistoryScreen() {
       <FlashList
         ref={listRef}
         data={filteredItems}
-        keyExtractor={(it, idx) => `${it.history.oid}-${idx}`}
+        keyExtractor={(it) => `${it.history.business}-${it.history.oid}`}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackMedium(); refresh(); }} tintColor={colors.textSecondary} />}
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         estimatedItemSize={82}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={
@@ -291,14 +306,16 @@ export default function HistoryScreen() {
           ) : null
         }
         ListEmptyComponent={
-          loading ? null : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="time-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无观看记录</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>看过的视频会出现在这里</Text>
-            </View>
+          loading ? null : error ? (
+            /* 首屏加载失败：统一 ErrorState + 重试（06 全局错误处理） */
+            <ErrorState
+              title="历史记录加载失败"
+              message="网络似乎开小差了，请检查后重试"
+              onRetry={refresh}
+            />
+          ) : (
+            /* 空态：共享 EmptyState（收敛 33 处 emptyIconBox 复制粘贴） */
+            <EmptyState icon="time-outline" title="暂无观看记录" subtitle="看过的视频会出现在这里" />
           )
         }
         renderItem={renderRow}
@@ -340,11 +357,7 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
   actionRow: { flexDirection: 'row', gap: 10 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14 },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
+  /* 登录按钮 */
   loginBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: 20, paddingHorizontal: 30, paddingVertical: 10 },
   loginBtnText: { color: '#FFFFFF', fontWeight: '600' },
   /* 骨架 */

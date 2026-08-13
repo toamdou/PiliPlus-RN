@@ -1,5 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import { storage } from '@/utils/storage';
+import { videoApi } from '@/api/video';
+import { getBestPlayUrl } from '@/utils/player-utils';
 import {
   ackDownloadCompletion,
   addDownloadCompleteListener,
@@ -9,9 +11,11 @@ import {
   fetchDownloads,
   fetchPendingCompletions,
   getDocumentsDirectoryPath,
+  pauseDownload as pauseNativeDownload,
   removeDownloadRecord,
   replaceDownloadRecords,
-  startDownload as startNativeDownload,
+  resumeDownload as resumeNativeDownload,
+  startDownloadWithMeta,
   type DownloadCompleteEvent,
   type DownloadPendingCompletion,
   type DownloadStateChangeEvent,
@@ -30,6 +34,21 @@ export interface DownloadItem {
   progress?: number;
   /** Legacy field used only to migrate old AsyncStorage entries. */
   nativeId?: string;
+  /** 以下为下载元数据（下载内搜索 / 单任务分P详情用），旧记录可能缺失。 */
+  author?: string;
+  bvid?: string;
+  aid?: number;
+  /** 同一视频（bvid）下的任务分组标识，单P 为 undefined。 */
+  taskId?: string;
+  /** 分P 序号（0 起），单P 为 undefined。 */
+  partIndex?: number;
+  /** 分P 标题。 */
+  partTitle?: string;
+  /** 总 P 数（多 P 视频）。 */
+  partCount?: number;
+  /** 下载清晰度（qn）。 */
+  quality?: number;
+  cid?: number;
 }
 
 const LEGACY_KEYS = ['piliplus_downloads', 'downloads'] as const;
@@ -63,6 +82,15 @@ function recordToItem(record: NativeDownloadRecord): DownloadItem {
     progress: typeof record.progress === 'number' ? record.progress : undefined,
   };
   if (record.error) item.error = record.error;
+  if (record.author) item.author = record.author;
+  if (record.bvid) item.bvid = record.bvid;
+  if (typeof record.aid === 'number') item.aid = record.aid;
+  if (record.taskId) item.taskId = record.taskId;
+  if (typeof record.partIndex === 'number') item.partIndex = record.partIndex;
+  if (record.partTitle) item.partTitle = record.partTitle;
+  if (typeof record.partCount === 'number') item.partCount = record.partCount;
+  if (typeof record.quality === 'number') item.quality = record.quality;
+  if (typeof record.cid === 'number') item.cid = record.cid;
   return item;
 }
 
@@ -79,6 +107,15 @@ function itemToRecord(item: DownloadItem): NativeDownloadRecord {
     progress: typeof item.progress === 'number' ? item.progress : item.status === 'done' ? 1 : 0,
   };
   if (item.error) record.error = item.error;
+  if (item.author) record.author = item.author;
+  if (item.bvid) record.bvid = item.bvid;
+  if (typeof item.aid === 'number') record.aid = item.aid;
+  if (item.taskId) record.taskId = item.taskId;
+  if (typeof item.partIndex === 'number') record.partIndex = item.partIndex;
+  if (item.partTitle) record.partTitle = item.partTitle;
+  if (typeof item.partCount === 'number') record.partCount = item.partCount;
+  if (typeof item.quality === 'number') record.quality = item.quality;
+  if (typeof item.cid === 'number') record.cid = item.cid;
   return record;
 }
 
@@ -210,18 +247,49 @@ export async function getDownloads(): Promise<DownloadItem[]> {
   return result;
 }
 
-export async function addDownload(input: { title: string; pic: string; url: string }): Promise<void> {
+export interface AddDownloadInput {
+  title: string;
+  pic: string;
+  url: string;
+  author?: string;
+  bvid?: string;
+  aid?: number;
+  taskId?: string;
+  partIndex?: number;
+  partTitle?: string;
+  partCount?: number;
+  quality?: number;
+  cid?: number;
+}
+
+/**
+ * 加入离线缓存。
+ * 支持多 P 下载：同一视频（bvid）多次调用并传 taskId / partIndex / partTitle / partCount，
+ * 会在下载记录上写入分 P 元数据，供单任务分 P 详情页分组展示。
+ */
+export async function addDownload(input: AddDownloadInput): Promise<void> {
   attachCoreListeners();
   const list = await getDownloads();
   if (list.some((d) => d.url === input.url && d.status !== 'error')) return;
-  const fileToken = `${Date.now()}`;
+  const fileToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const documentsPath = await getDocumentsDirectoryPath();
   const filePath = `${documentsPath}/piliplus_${fileToken}.mp4`;
-  const nativeId = await startNativeDownload(
+  const nativeId = await startDownloadWithMeta(
     input.url,
     filePath,
-    input.title || '未命名视频',
-    input.pic || '',
+    {
+      title: input.title || '未命名视频',
+      pic: input.pic || '',
+      author: input.author,
+      bvid: input.bvid,
+      aid: input.aid,
+      taskId: input.taskId,
+      partIndex: input.partIndex,
+      partTitle: input.partTitle,
+      partCount: input.partCount,
+      quality: input.quality,
+      cid: input.cid,
+    },
   );
   if (!nativeId) {
     throw new Error('Native download failed to start');
@@ -256,4 +324,160 @@ export async function clearDownloads(): Promise<void> {
 
 export async function exportDownloadsToClipboard(items: DownloadItem[]): Promise<void> {
   await Clipboard.setStringAsync(JSON.stringify(items, null, 2));
+}
+
+/* ====================== 下载内搜索 / 单任务分P 详情辅助 ====================== */
+
+/**
+ * 按关键词本地过滤下载任务（对齐 Flutter download/search 纯本地过滤）：
+ * 匹配标题 / UP 主 / 分P 标题 / BV 号，大小写不敏感。
+ */
+export async function searchDownloads(keyword: string): Promise<DownloadItem[]> {
+  const list = await getDownloads();
+  const q = keyword.trim().toLowerCase();
+  if (!q) return list;
+  return list.filter((item) =>
+    item.title.toLowerCase().includes(q) ||
+    (item.author || '').toLowerCase().includes(q) ||
+    (item.partTitle || '').toLowerCase().includes(q) ||
+    (item.bvid || '').toLowerCase().includes(q),
+  );
+}
+
+/** 取单个下载任务。 */
+export async function getDownloadTask(id: string): Promise<DownloadItem | null> {
+  const list = await getDownloads();
+  return list.find((it) => it.id === id) ?? null;
+}
+
+/**
+ * 取某任务所属视频的全部分 P 下载（多 P 视频）：
+ * 以 bvid（旧记录回退 taskId）分组，按 partIndex 升序；单 P 返回自身。
+ */
+export async function getTaskParts(id: string): Promise<DownloadItem[]> {
+  const list = await getDownloads();
+  const self = list.find((it) => it.id === id);
+  if (!self) return [];
+  const groupKey = self.bvid || self.taskId;
+  if (!groupKey) return [self];
+  const parts = list
+    .filter((it) => (it.bvid || it.taskId) === groupKey)
+    .sort((a, b) => (a.partIndex ?? 0) - (b.partIndex ?? 0));
+  return parts.length > 0 ? parts : [self];
+}
+
+/**
+ * 重试失败的任务：删除旧记录后，用缓存的流 URL 重新起一个下载任务。
+ * 保持原分 P / 清晰度元数据，便于详情页继续分组。
+ */
+export async function retryDownload(item: DownloadItem): Promise<boolean> {
+  try {
+    await removeDownload(item.id);
+    await addDownload({
+      title: item.title,
+      pic: item.pic,
+      url: item.url,
+      author: item.author,
+      bvid: item.bvid,
+      aid: item.aid,
+      taskId: item.taskId,
+      partIndex: item.partIndex,
+      partTitle: item.partTitle,
+      partCount: item.partCount,
+      quality: item.quality,
+      cid: item.cid,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 暂停单个下载任务（原生层取消 URLSession 任务并保留记录）。 */
+export async function pauseTask(id: string): Promise<void> {
+  await pauseNativeDownload(id);
+  await refreshDownloadCache();
+}
+
+/** 恢复单个下载任务（原生层用缓存的流 URL 重开任务）。 */
+export async function resumeTask(id: string): Promise<void> {
+  await resumeNativeDownload(id);
+  await refreshDownloadCache();
+}
+
+async function refreshDownloadCache(): Promise<void> {
+  downloadsCache = null;
+  await getDownloads();
+  notifyDownloadsChanged();
+}
+
+/* ====================== 清晰度 / 分P 选择下载 ====================== */
+
+export interface DownloadPartMeta {
+  cid: number;
+  /** 分P 标题（B 站 pagelist 的 part 字段） */
+  part: string;
+  duration?: number;
+}
+
+export interface DownloadVideoPartsInput {
+  bvid?: string;
+  aid?: number;
+  title: string;
+  pic: string;
+  author?: string;
+  /** 任务分组标识：同一视频多 P 共用一个 taskId（缺省回退 bvid）。 */
+  taskId?: string;
+  parts: DownloadPartMeta[];
+  /** 需要下载的分 P cid 列表（多选）。 */
+  selectedCids: number[];
+  /** 清晰度（qn，作用于每个所选 P 的取流 URL）。 */
+  quality: number;
+}
+
+/**
+ * 多 P 下载：按所选清晰度逐 P 取流（videoApi.playUrl → getBestPlayUrl），
+ * 再逐 P 写入下载记录。下载仍是"缓存当前流 URL"模型——清晰度选择作用于所选 P 的取流 URL。
+ * 返回成功/失败数量。
+ */
+export async function downloadVideoParts(input: DownloadVideoPartsInput): Promise<{ ok: number; failed: number }> {
+  attachCoreListeners();
+  let ok = 0;
+  let failed = 0;
+  for (const cid of input.selectedCids) {
+    const meta = input.parts.find((p) => p.cid === cid);
+    if (!meta) continue;
+    try {
+      const res = await videoApi.playUrl({
+        avid: input.aid,
+        bvid: input.bvid,
+        cid,
+        qn: input.quality,
+      });
+      const url = getBestPlayUrl(res?.data);
+      if (!url) {
+        failed += 1;
+        continue;
+      }
+      const partIndex = input.parts.findIndex((p) => p.cid === cid);
+      await addDownload({
+        title: input.title,
+        pic: input.pic,
+        url,
+        author: input.author,
+        bvid: input.bvid,
+        aid: input.aid,
+        taskId: input.taskId,
+        partIndex: partIndex >= 0 ? partIndex : undefined,
+        partTitle: meta.part,
+        partCount: input.parts.length,
+        quality: input.quality,
+        cid,
+      });
+      ok += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { ok, failed };
 }

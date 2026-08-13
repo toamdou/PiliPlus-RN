@@ -16,6 +16,8 @@ import { feedBackMedium } from '@/utils/feedback';
 import { formatCount } from '@/utils/format';
 import { showToast } from '@/utils/toast';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const SIDE = 14;
 const GAP = 12;
@@ -191,31 +193,17 @@ export default function LiveSearchScreen() {
     if (loading) return null;
     if (error) {
       return (
-        <View style={styles.emptyWrap}>
-          <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-          </View>
-          <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>{error}</Text>
-          <Press haptic scaleTo={0.94} onPress={refresh} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
-            <Text style={[T.subhead, styles.retryText]}>重试</Text>
-          </Press>
-        </View>
+        <ErrorState title={typeof error === 'string' ? error : '加载失败'} onRetry={refresh} />
       );
     }
     return (
-      <View style={styles.emptyWrap}>
-        <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-          <Ionicons name="radio-outline" size={38} color={colors.textTertiary} />
-        </View>
-        <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>
-          {submitted ? '没有找到相关内容' : '搜索房间或主播'}
-        </Text>
-        {!submitted ? (
-          <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>输入关键词后按搜索</Text>
-        ) : null}
-      </View>
+      <EmptyState
+        icon="radio-outline"
+        title={submitted ? '没有找到相关内容' : '搜索房间或主播'}
+        subtitle={!submitted ? '输入关键词后按搜索' : undefined}
+      />
     );
-  }, [loading, error, submitted, colors, T, refresh]);
+  }, [loading, error, submitted, refresh]);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
@@ -266,9 +254,6 @@ export default function LiveSearchScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         estimatedItemSize={isRoom ? 210 : 64}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={
@@ -320,12 +305,6 @@ const styles = StyleSheet.create({
   userName: { flexShrink: 1, fontWeight: '600' },
   livePill: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1.5 },
   livePillText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
-  retryText: { color: '#FFFFFF', fontWeight: '600' },
   skeletonWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: SIDE, paddingTop: 12, gap: 12 },
   skeletonRow: { flexDirection: 'row', gap: GAP },
   skeletonCol: { flex: 1 },

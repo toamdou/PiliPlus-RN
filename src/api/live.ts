@@ -1,9 +1,25 @@
 import { liveClient, get, post, getWbi, type RequestConfig } from './client';
 import { Api } from './endpoints';
-import { getCSRF, getAccessKey } from '@/utils/cookie';
-import { STATISTICS, signAppParamsAsync } from '@/utils/app-sign';
+import { getCSRF } from '@/utils/cookie';
+import { STATISTICS, signAppParamsAsync, USER_AGENT } from '@/utils/app-sign';
 import { FORM_HEADERS, formBody } from '@/utils/form';
 import { wbiSignQuery } from '@/utils/wbi-sign';
+import { getOrCreateLoginBuvidAsync } from 'pili-native-core';
+
+/** app-interface 系列统一风控头（对齐 Flutter live.dart:197-251 的 header 集合：buvid/fp/env/app-key=android） */
+async function buildAppSignHeaders(): Promise<Record<string, string>> {
+  const buvid = await getOrCreateLoginBuvidAsync().catch(() => '');
+  return {
+    'app-key': 'android',
+    'env': 'prod',
+    'User-Agent': USER_AGENT,
+    'buvid': buvid || '',
+    'fp_local': '1'.repeat(64),
+    'fp_remote': '1'.repeat(64),
+    'session_id': '11111111',
+    'x-bili-aurora-zone': 'sh001',
+  };
+}
 
 export const liveApi = {
   // 直播间信息
@@ -91,14 +107,54 @@ export const liveApi = {
     return get(liveClient, Api.liveSearch, signed, config);
   },
 
-  // 直播分区列表
-  async areaList() {
-    return get(liveClient, Api.liveAreaList);
+  // 直播分区列表（R3：appSign + app-key:android 头，对齐 Flutter liveAreaList）
+  async areaList(config?: RequestConfig) {
+    const signed = await signAppParamsAsync({
+      actionKey: 'appkey',
+      build: 8430300,
+      channel: 'master',
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      disable_rcmd: 0,
+      mobi_app: 'android',
+      platform: 'android',
+      s_locale: 'zh_CN',
+      statistics: STATISTICS,
+    });
+    return get(liveClient, Api.liveAreaList, signed, { headers: await buildAppSignHeaders(), ...config });
   },
 
-  // 直播分区房间列表
+  // 直播分区房间列表（R3：appSign + app-key:android 头，对齐 Flutter liveSecondList）
   async secondList(params: { parent_area_id: number; area_id: number; page?: number; sort_type?: string }, config?: RequestConfig) {
-    return get(liveClient, Api.liveSecondList, { page: 1, sort_type: 'online', ...params }, config);
+    const signed = await signAppParamsAsync({
+      actionKey: 'appkey',
+      build: 8430300,
+      channel: 'master',
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      device_name: 'android',
+      device_type: 0,
+      fnval: 912,
+      disable_rcmd: 0,
+      https_url_req: 1,
+      mobi_app: 'android',
+      module_select: 0,
+      network: 'wifi',
+      page: params.page ?? 1,
+      page_size: 20,
+      platform: 'android',
+      qn: 0,
+      sort_type: params.sort_type ?? 'online',
+      tag_version: 1,
+      s_locale: 'zh_CN',
+      scale: 2,
+      statistics: STATISTICS,
+      parent_area_id: params.parent_area_id,
+      area_id: params.area_id,
+    });
+    return get(liveClient, Api.liveSecondList, signed, { headers: await buildAppSignHeaders(), ...config });
   },
 
   // 进入直播间上报
@@ -176,54 +232,94 @@ export const liveApi = {
     return get(liveClient, Api.getLiveInfoByUser, params);
   },
 
-  // 直播首页 Feed（app 端接口，参数/headers 对齐 Flutter LiveHttp.liveFeedIndex）
+  // 直播首页 Feed（app 端接口，R3：appSign + buvid/app-key:android 头，对齐 Flutter liveFeedIndex）
   async feedIndex(params?: Record<string, any>, config?: RequestConfig) {
-    const requestConfig: RequestConfig = {
+    const signed = await signAppParamsAsync({
+      channel: 'master',
+      actionKey: 'appkey',
+      build: 8430300,
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      device_name: 'android',
+      device_type: 0,
+      fnval: 912,
+      disable_rcmd: 0,
+      https_url_req: 1,
+      mobi_app: 'android',
+      network: 'wifi',
+      page: 1,
+      platform: 'android',
+      s_locale: 'zh_CN',
+      scale: 2,
+      statistics: STATISTICS,
+      ...params,
+    });
+    return get(liveClient, Api.liveFeedIndex, signed, {
       ...config,
-      headers: { 'app-key': 'android', ...(config?.headers ?? {}) },
-    };
-    return get(
-      liveClient,
-      Api.liveFeedIndex,
-      {
-        channel: 'master',
-        actionKey: 'appkey',
-        build: 8430300,
-        version: '8.43.0',
-        c_locale: 'zh_CN',
-        device: 'android',
-        device_name: 'android',
-        device_type: 0,
-        fnval: 912,
-        disable_rcmd: 0,
-        https_url_req: 1,
-        mobi_app: 'android',
-        network: 'wifi',
-        page: 1,
-        platform: 'android',
-        s_locale: 'zh_CN',
-        scale: 2,
-        statistics: STATISTICS,
-        access_key: getAccessKey() || undefined,
-        ...params,
-      },
-      requestConfig,
-    );
+      headers: { ...(await buildAppSignHeaders()), ...(config?.headers ?? {}) },
+    });
   },
 
-  // 获取收藏分区
+  // 获取收藏分区（R3：appSign，对齐 Flutter getLiveFavTag）
   async getFavTag() {
-    return get(liveClient, Api.getLiveFavTag);
+    const signed = await signAppParamsAsync({
+      actionKey: 'appkey',
+      build: 8430300,
+      channel: 'master',
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      disable_rcmd: 0,
+      mobi_app: 'android',
+      platform: 'android',
+      s_locale: 'zh_CN',
+      statistics: STATISTICS,
+    });
+    return get(liveClient, Api.getLiveFavTag, signed, { headers: await buildAppSignHeaders() });
   },
 
-  // 设置收藏分区
+  // 设置收藏分区（app 端签名，对齐 Flutter setLiveFavTag）
   async setFavTag(params: { tag_id: number; action: number }) {
-    return post(liveClient, Api.setLiveFavTag, null, { ...params, csrf: getCSRF() });
+    const signed = await signAppParamsAsync({
+      actionKey: 'appkey',
+      build: 8430300,
+      channel: 'master',
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      disable_rcmd: 0,
+      mobi_app: 'android',
+      platform: 'android',
+      s_locale: 'zh_CN',
+      statistics: STATISTICS,
+      csrf: getCSRF() || '',
+      ...params,
+    });
+    return post(liveClient, Api.setLiveFavTag, formBody(signed), undefined, {
+      headers: { ...(await buildAppSignHeaders()), ...FORM_HEADERS },
+    });
   },
 
-  // 房间分区列表
+  // 房间分区列表（R3：appSign + app-key:android 头，对齐 Flutter liveRoomAreaList）
   async roomAreaList(params?: { parent_id?: number }) {
-    return get(liveClient, Api.liveRoomAreaList, params);
+    const signed = await signAppParamsAsync({
+      actionKey: 'appkey',
+      build: 8430300,
+      channel: 'master',
+      version: '8.43.0',
+      c_locale: 'zh_CN',
+      device: 'android',
+      disable_rcmd: 0,
+      need_entrance: 1,
+      parent_id: params?.parent_id,
+      source_id: 2,
+      mobi_app: 'android',
+      platform: 'android',
+      s_locale: 'zh_CN',
+      statistics: STATISTICS,
+    });
+    return get(liveClient, Api.liveRoomAreaList, signed, { headers: await buildAppSignHeaders() });
   },
 
   // 弹幕禁言规则（type: level | rank | verify，level 1 开启 / 0 关闭，对齐 Flutter LiveHttp.liveSetSilent）

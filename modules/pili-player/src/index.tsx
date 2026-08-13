@@ -42,6 +42,10 @@ type PiliPlayerEventMap = {
   playToEnd: Record<string, never>;
   error: PiliPlayerErrorPayload;
   firstFrameRender: Record<string, never>;
+  /** 缓冲中状态（04-P0/3.4）：原生 timeControlStatus == .waitingToPlayAtSpecifiedRate 时透出 */
+  buffering: { isBuffering: boolean };
+  /** PiP 激活状态变化（批次5 P3）：true=小窗已开启，false=小窗已关闭 */
+  pictureInPictureActiveChange: { active: boolean };
 };
 
 export type PiliSeekThumbnailImage = SharedRef<'image'>;
@@ -78,6 +82,13 @@ type NativePiliPlayerModule = {
   saveScreenshotToPhotosAsync(): Promise<boolean>;
   presentFullscreenAsync(options: Record<string, any>): Promise<boolean>;
   dismissFullscreen(): void;
+  // 画中画 PiP（批次5 P3）
+  setPiPEnabled(enabled: boolean): void;
+  setPiPRequiresLinearPlayback(enabled: boolean): void;
+  startPictureInPicture(): void;
+  stopPictureInPicture(): void;
+  isPictureInPictureActive(): boolean;
+  isPictureInPicturePossible(): boolean;
   cropSeekThumbnailAsync(
     uri: string,
     col: number,
@@ -218,11 +229,17 @@ export class PiliPlayer {
   }
 
   async replaceAsync(source: PiliPlayerSource | null): Promise<void> {
-    if (!source) return;
+    // 04-3.7：放开 null 路径——页面卸载时可用 replaceAsync(null) 主动清空
+    // AVPlayerItem，释放解码器 + 前向缓冲常驻内存。原生 load(source: nil)
+    // 会 replaceCurrentItem(with: nil) 并置 status=idle。
     this.source = source;
     const oldStatus = this.cachedStatus;
-    this.cachedStatus = 'loading';
-    this.emitLocal('statusChange', { status: 'loading', oldStatus });
+    if (source) {
+      this.cachedStatus = 'loading';
+      this.emitLocal('statusChange', { status: 'loading', oldStatus });
+    } else {
+      this.cachedStatus = 'idle';
+    }
     await this.native.replaceAsync(source);
   }
 
@@ -332,6 +349,42 @@ export class PiliPlayer {
 
   dismissFullscreen(): void {
     this.native.dismissFullscreen();
+  }
+
+  // ===== 画中画 PiP（批次5 P3） =====
+
+  /** 后台画中画开关：同步原生，开启后进入后台自动拉起系统 PiP 小窗 */
+  setPiPEnabled(enabled: boolean): void {
+    this.native.setPiPEnabled(enabled);
+  }
+
+  /** PiP 小窗内是否锁定线性播放（禁用进度/倍速控件），默认 true */
+  setPiPRequiresLinearPlayback(enabled: boolean): void {
+    this.native.setPiPRequiresLinearPlayback(enabled);
+  }
+
+  /** 手动开启画中画（仅当 isPictureInPicturePossible 为 true 时生效） */
+  startPictureInPicture(): void {
+    this.native.startPictureInPicture();
+  }
+
+  /** 手动关闭画中画 */
+  stopPictureInPicture(): void {
+    this.native.stopPictureInPicture();
+  }
+
+  get isPictureInPictureActive(): boolean {
+    try {
+      return this.native.isPictureInPictureActive();
+    } catch {}
+    return false;
+  }
+
+  get isPictureInPicturePossible(): boolean {
+    try {
+      return this.native.isPictureInPicturePossible();
+    } catch {}
+    return false;
   }
 
   cropSeekThumbnailAsync(

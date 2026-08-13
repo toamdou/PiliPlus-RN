@@ -14,6 +14,7 @@ import { PgcPlayer } from '@/components/pgc/PgcPlayer';
 import { PgcEpisodeGrid } from '@/components/pgc/PgcEpisodeGrid';
 import { PgcInfoHeader } from '@/components/pgc/PgcInfoHeader';
 import PgcReviewSection from '@/components/pgc/PgcReviewSection';
+import ErrorState from '@/components/ErrorState';
 import type { Episode, SeasonDetail } from '@/components/pgc/pgc-types';
 import { pgcApi } from '@/api/pgc';
 import { videoApi } from '@/api/video';
@@ -35,6 +36,7 @@ function PgcDetailBody({ player }: { player: any }) {
   const playRepeat = useSettingsStore((s) => s.playRepeat);
   const [detail, setDetail] = useState<SeasonDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [tab, setTab] = useState<'eps' | 'review'>('eps');
   const activeTab = showBangumiReply ? tab : 'eps';
   const [followStatus, setFollowStatus] = useState(0);
@@ -51,6 +53,8 @@ function PgcDetailBody({ player }: { player: any }) {
   const pgcStartedRef = useRef(false);
   const pgcBackgroundPauseRef = useRef(false);
   const lastGoodPlayUrlRef = useRef('');
+  /** 断点续播：readyToPlay 时 seek 到服务端 watch_progress（R1） */
+  const pgcResumeSeekRef = useRef(0);
   const listRef = useRef<FlashListRef<Episode>>(null);
   useScrollToTop(listRef);
 
@@ -62,19 +66,30 @@ function PgcDetailBody({ player }: { player: any }) {
     };
   }, [playUrl]);
 
+  // 分享链接：ep 深链时用 season_id 组装 ss 链接，避免 /pgc/ep_<id> 拼出 ssep<id>。
+  const shareLink = useMemo(() => {
+    const seasonId = detail?.season_id || (/^\d+$/.test(String(id || '')) ? parseInt(String(id), 10) : 0);
+    return seasonId ? `https://www.bilibili.com/bangumi/play/ss${seasonId}` : '';
+  }, [detail, id]);
+
   const loadEpPlayUrl = useCallback(async (ep: Episode) => {
     const seq = ++pgcSeqRef.current;
     setPgcLoading(true);
     try {
-      const res = await videoApi.pgcPlayUrl({ cid: ep.cid, bvid: ep.bvid, qn: 0, fnval: 4048 });
+      // R1（03-R1）：/pgc/player/web/v2/playurl 载荷在 result.video_info，旧代码读 res.data 恒为 undefined 导致番剧必挂；
+      // fnval 用 0（durl 合流），保证 iOS AVPlayer 有声可播（04-3.9 有画无声修复）。
+      const res = await videoApi.pgcPlayUrl({ cid: ep.cid, bvid: ep.bvid, qn: 0, fnval: 0 });
       if (seq !== pgcSeqRef.current) return;
-      const url = getBestPlayUrl(res?.data);
+      const videoInfo = (res as any)?.result?.video_info;
+      const url = getBestPlayUrl(videoInfo);
       if (!url) {
         showToast(res?.message || '获取播放地址失败');
         return;
       }
-      const clips = Array.isArray((res as any)?.data?.clip_info_list)
-        ? ((res as any).data.clip_info_list as any[]).map((c: any) => ({
+      // 断点续播：watch_progress 在 result.play_view_business_info.user_status 下（对齐 Flutter video.dart:250-255）
+      const watchProgress = (res as any)?.result?.play_view_business_info?.user_status?.watch_progress?.current_watch_progress;
+      const clips = Array.isArray(videoInfo?.clip_info_list)
+        ? (videoInfo.clip_info_list as any[]).map((c: any) => ({
           start: Number(c?.start) || 0,
           end: Number(c?.end) || 0,
           clipType: String(c?.clipType || ''),
@@ -82,6 +97,9 @@ function PgcDetailBody({ player }: { player: any }) {
         : [];
       setPgcClips(clips);
       setPlayUrl(url);
+      if (typeof watchProgress === 'number' && watchProgress > 0) {
+        pgcResumeSeekRef.current = watchProgress;
+      }
     } catch {
       if (seq === pgcSeqRef.current) showToast('获取播放地址失败');
     } finally {
@@ -91,8 +109,22 @@ function PgcDetailBody({ player }: { player: any }) {
 
   const loadSeason = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
-      const res = await pgcApi.seasonInfo({ season_id: parseInt(id) });
+      // N4（06-N4）：通知深链 ep 被映射为 /pgc/ep_<epId>，id 以 "ep" 开头时按 ep_id 取 season 再走原流程。
+      const idStr = String(id || '').trim();
+      const epMatch = /^ep(\d+)$/i.exec(idStr);
+      let res: any;
+      if (epMatch) {
+        res = await pgcApi.seasonInfo({ ep_id: parseInt(epMatch[1], 10) });
+      } else {
+        const seasonId = parseInt(idStr, 10);
+        if (Number.isNaN(seasonId)) {
+          setLoadError(true);
+          return;
+        }
+        res = await pgcApi.seasonInfo({ season_id: seasonId });
+      }
       if (res?.result) {
         const d = res.result;
         const eps: Episode[] = (d.episodes || []).map((ep: any) => ({
@@ -115,18 +147,24 @@ function PgcDetailBody({ player }: { player: any }) {
           episodes: eps,
         });
         if (eps.length > 0) {
-          setActiveEpIndex(0);
-          setActiveEp(eps[0]);
+          // ep 深链时优先定位到该集（result.ep_id 由 season?ep_id= 返回）
+          const targetIndex = epMatch ? eps.findIndex((ep) => ep.id === d.ep_id) : -1;
+          const startIndex = targetIndex >= 0 ? targetIndex : 0;
+          setActiveEpIndex(startIndex);
+          setActiveEp(eps[startIndex]);
           pgcStartedRef.current = useSettingsStore.getState().autoPlay;
-          loadEpPlayUrl(eps[0]);
+          loadEpPlayUrl(eps[startIndex]);
         }
         setFollowStatus(d.user_status?.follow === 1 ? (d.user_status?.follow_status || 1) : 0);
         setLiked(d.user_status?.like === 1);
         setCoined(d.user_status?.coin === 1);
         setFaved(d.user_status?.fav === 1);
+      } else {
+        setLoadError(true);
       }
     } catch (e) {
       console.error('loadSeason error:', e);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -185,6 +223,12 @@ function PgcDetailBody({ player }: { player: any }) {
     });
     const statusSub = player.addListener('statusChange', (e: any) => {
       if (e?.status === 'readyToPlay') {
+        // R1 断点续播：源就绪后先 seek 到服务端 watch_progress 再播放
+        const resume = pgcResumeSeekRef.current;
+        if (resume > 0) {
+          pgcResumeSeekRef.current = 0;
+          try { player.seekTo(resume); } catch {}
+        }
         if (pgcStartedRef.current) player.play();
       }
     });
@@ -344,7 +388,7 @@ function PgcDetailBody({ player }: { player: any }) {
           <Stack.Toolbar.Button icon="hand.thumbsup" accessibilityLabel={liked ? '取消点赞' : '点赞'} onPress={handlePgcLike} />
           <Stack.Toolbar.Button icon="yensign.circle" accessibilityLabel={coined ? '已投币' : '投币'} onPress={handlePgcCoin} />
           <Stack.Toolbar.Button icon="star" accessibilityLabel={faved ? '取消收藏' : '收藏'} onPress={handlePgcFav} />
-          <Stack.Toolbar.Button icon="square.and.arrow.up" accessibilityLabel="分享" onPress={() => Share.share({ message: `https://www.bilibili.com/bangumi/play/ss${id}` })} />
+          <Stack.Toolbar.Button icon="square.and.arrow.up" accessibilityLabel="分享" onPress={() => shareLink && Share.share({ message: shareLink })} />
         </Stack.Toolbar>
       ) : null}
 
@@ -407,7 +451,7 @@ function PgcDetailBody({ player }: { player: any }) {
                 onLike={handlePgcLike}
                 onCoin={handlePgcCoin}
                 onFav={handlePgcFav}
-                onShare={() => Share.share({ message: `https://www.bilibili.com/bangumi/play/ss${id}` })}
+                onShare={() => shareLink && Share.share({ message: shareLink })}
               />
             }
             showTimeline={showPgcTimeline}
@@ -423,6 +467,13 @@ function PgcDetailBody({ player }: { player: any }) {
             seasonTitle={detail.title}
           />
         )
+      ) : loadError ? (
+        // G1（06-G1）：加载失败提供错误态 + 重试按钮（全站共享 ErrorState 组件）
+        <ErrorState
+          title="加载失败"
+          message="番剧信息获取失败，请检查网络后重试"
+          onRetry={loadSeason}
+        />
       ) : (
         <View style={styles.loadingWrap}>
           <Text style={[T.footnote, styles.empty, { color: colors.textTertiary }]}>加载失败</Text>

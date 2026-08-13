@@ -172,6 +172,7 @@ export interface MemberTabContainerProps {
   videos: VideoItem[];
   dynamics: DynItem[];
   coinVideos: VideoItem[];
+  likeVideos: VideoItem[];
   videosLoadingMore: boolean;
   dynLoadingMore: boolean;
   videosError: string | null;
@@ -179,11 +180,14 @@ export interface MemberTabContainerProps {
   dynError: string | null;
   coinsLoading: boolean;
   coinsError: string | null;
+  likesLoading: boolean;
+  likesError: string | null;
   onLoadMoreVideos: () => void;
   onLoadMoreDynamics: () => void;
   onRetryVideos: () => void;
   onRetryDynamics: () => void;
   onRetryCoins: () => void;
+  onRetryLikes: () => void;
 }
 
 export function MemberTabContainer({
@@ -194,6 +198,7 @@ export function MemberTabContainer({
   videos,
   dynamics,
   coinVideos,
+  likeVideos,
   videosLoadingMore,
   dynLoadingMore,
   videosError,
@@ -201,11 +206,14 @@ export function MemberTabContainer({
   dynError,
   coinsLoading,
   coinsError,
+  likesLoading,
+  likesError,
   onLoadMoreVideos,
   onLoadMoreDynamics,
   onRetryVideos,
   onRetryDynamics,
   onRetryCoins,
+  onRetryLikes,
 }: MemberTabContainerProps) {
   const colors = useThemeColors();
   const T = useType();
@@ -343,6 +351,42 @@ export function MemberTabContainer({
             <View style={styles.emptyWrap}>
               <Ionicons name="logo-bitcoin" size={34} color={colors.textTertiary} />
               <Text style={[T.footnote, styles.emptyText, { color: colors.textSecondary }]}>最近没有投币</Text>
+            </View>
+          )
+        }
+        renderItem={renderCoinVideo}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      />
+    );
+  }
+
+  if (activeTab === 'like') {
+    return (
+      <FlashList
+        ref={listRef}
+        data={likeVideos}
+        keyExtractor={(it) => it.bvid}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        ListHeaderComponent={header}
+        estimatedItemSize={118}
+        overrideItemLayout={videoLayout}
+        windowSize={9}
+        initialNumToRender={10}
+        maxToRenderPerBatch={12}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 10 }}
+        ListEmptyComponent={
+          likesLoading ? (
+            <View style={{ marginTop: 50, alignItems: 'center' }}>
+              <Host matchContents><ProgressView /></Host>
+            </View>
+          ) : likesError ? (
+            <TabError message={likesError} onRetry={onRetryLikes} />
+          ) : (
+            <View style={styles.emptyWrap}>
+              <Ionicons name="heart-outline" size={34} color={colors.textTertiary} />
+              <Text style={[T.footnote, styles.emptyText, { color: colors.textSecondary }]}>最近没有点赞</Text>
             </View>
           )
         }

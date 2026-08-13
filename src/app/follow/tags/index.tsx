@@ -15,6 +15,7 @@ import { showToast } from '@/utils/toast';
 import { feedBackMedium, feedBackSuccess } from '@/utils/feedback';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { NativeBottomSheet } from '@/components/NativeBottomSheet';
+import EmptyState from '@/components/EmptyState';
 
 const rowLayout = fixedItemLayout(58);
 
@@ -346,19 +347,15 @@ export default function FollowTagsScreen() {
           onRefresh={() => { loadTags(true); }}
           estimatedItemSize={58}
           overrideItemLayout={rowLayout}
-          windowSize={9}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
+          drawDistance={250}
           overrideProps={{ initialDrawBatchSize: 10 }}
           ListEmptyComponent={
             loading ? null : (
-              <View style={styles.emptyWrap}>
-                <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                  <Ionicons name="folder-open-outline" size={38} color={colors.textTertiary} />
-                </View>
-                <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无分组</Text>
-                <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>点击右上角「新建」创建关注分组</Text>
-              </View>
+              <EmptyState
+                icon="folder-open-outline"
+                title="暂无分组"
+                subtitle="点击右上角「新建」创建关注分组"
+              />
             )
           }
           renderItem={renderRow}
@@ -445,11 +442,6 @@ const styles = StyleSheet.create({
   countText: { fontWeight: '500' },
   moveBtns: { flexDirection: 'row', gap: 6 },
   moveBtn: { width: 30, height: 30, borderRadius: RADII.sm, justifyContent: 'center', alignItems: 'center', ...continuous },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
   /* 骨架 */
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
   /* 新建/改名对话框 */

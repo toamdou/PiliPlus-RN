@@ -49,7 +49,10 @@ export default function MineScreen() {
         .then((res: any) => {
           if (res?.data) setStat(res.data);
         })
-        .catch(() => {});
+        .catch((e) => {
+          /* 统计数据失败静默（次要项）：至少落日志，便于排查与后续接入错误态 */
+          console.error('fetch userStat error:', e);
+        });
     }
   }, [isLoggedIn, userInfo]);
 

@@ -1,20 +1,38 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Alert, View, Text, StyleSheet } from 'react-native';
+import {
+  Alert,
+  View,
+  Text,
+  StyleSheet,
+  ActivityIndicator,
+  Pressable,
+  type GestureResponderEvent,
+} from 'react-native';
 import type { FlashListRef } from '@shopify/flash-list';
 import { Host, ProgressView } from '@expo/ui/swift-ui';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { useThemeColors } from '@/components/SwiftUIHost';
+import { useLocalSearchParams, Stack, useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Image as ExpoImage } from 'expo-image';
+import { PiliPlayer, PiliPlayerView } from 'pili-player';
+import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { useType } from '@/components/type-scale';
+import { Press } from '@/components/motion';
 import { DynamicDetailBody } from '@/components/dynamics/DynamicDetailBody';
-import { type DynDetail, type VoteInfoData, type ReserveCard } from '@/components/dynamics/dynamic-types';
+import { type DynDetail, type VoteInfoData, type ReserveCard, dynArchive } from '@/components/dynamics/dynamic-types';
 import { type ReplyItem } from '@/components/CommentSection';
 import { dynamicsApi } from '@/api/dynamics';
+import { videoApi } from '@/api/video';
 import { replyApi } from '@/api/reply';
 import { createNativeRequestCancelToken, type NativeRequestCancelToken } from '@/utils/request-cancel';
 import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
 import { feedBack, feedBackSuccess } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
+import { av2bv } from '@/utils/id-utils';
+import { PLAYER_HEADERS, getBestPlayUrl } from '@/utils/player-utils';
+import { formatDuration } from '@/utils/format';
+import { biliCover } from '@/utils/image-url';
+import { RADII, shadow } from '@/theme/tokens';
 
 const DYNAMIC_REPORT_REASONS = [
   { code: 1, label: '色情低俗' },
@@ -22,6 +40,279 @@ const DYNAMIC_REPORT_REASONS = [
   { code: 3, label: '违法违规' },
   { code: 4, label: '人身攻击' },
 ];
+
+/* ===== 动态详情内联播放器（batch-5 P1）=====
+ * 仅对带 bvid/cid 的视频类动态（DYNAMIC_TYPE_AV / UGC_SEASON / PGC 等）渲染。
+ *
+ * 播放器实例策略：页面内独立 `new PiliPlayer()` 实例（非共享单例直接引用），
+ * 避免与视频详情页/直播页的 PiliPlayer.shared 归属逻辑纠缠；退出页面时
+ * `replaceAsync(null)` 主动清空源（对齐审计 N1：卸载只 pause 不重置源会
+ * 导致"返回上一级显示最后一帧/黑屏、点播放播出上一屏内容"）。
+ *
+ * 原生 PiliPlayerSession 本身是单例，JS 侧多实例共享同一 AVPlayer——因此
+ * 进入播放时即对共享播放器源产生占用：本页在失焦时暂停、返回时校验
+ * `sourceUri !== 本页 playUrl` 则重新 replaceAsync 恢复（等价于 N1 的焦点校验），
+ * 但不动 stores/player.ts，避免与视频页的 claimSource 逻辑互相覆盖。 */
+function DynamicInlinePlayer({
+  detail,
+  colors,
+  T,
+  onOpenVideo,
+}: {
+  detail: DynDetail;
+  colors: ReturnType<typeof useThemeColors>;
+  T: ReturnType<typeof useType>;
+  onOpenVideo: (bvid: string) => void;
+}) {
+  const archive = dynArchive(detail);
+  /* 优先 archive.bvid；部分 ugc_season/pgc 仅带 aid，用 av2bv 反算 bvid */
+  const bvid = archive?.bvid || (archive?.aid ? av2bv(archive.aid) : '');
+  /* 动态详情接口的 archive 带 cid（类型未声明，防御式读取） */
+  const cid = (archive as any)?.cid as number | undefined;
+
+  /* 播放器实例：原生 PiliPlayerSession 是单例，JS 侧 new PiliPlayer() 只是独立封装。
+     ref 持有稳定实例，useState 镜像一份供渲染期传给 PiliPlayerView
+     （避免 react-hooks/refs：渲染体内不得读 ref）。getPlayer 惰性创建，
+     首次点击播放或首次取到播放地址时才实例化。 */
+  const playerRef = useRef<PiliPlayer | null>(null);
+  const [player, setPlayer] = useState<PiliPlayer | null>(null);
+  const [playUrl, setPlayUrl] = useState('');
+  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlFailed, setUrlFailed] = useState(false);
+  const [videoStarted, setVideoStarted] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playFailed, setPlayFailed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const videoStartedRef = useRef(false);
+  useEffect(() => {
+    videoStartedRef.current = videoStarted;
+  }, [videoStarted]);
+  /* 进度条可点按 seek：记录轨道实际宽度用于换算 locationX */
+  const trackWidthRef = useRef(0);
+
+  const getPlayer = useCallback(() => {
+    if (!playerRef.current) {
+      const p = new PiliPlayer();
+      p.setRate(1);
+      playerRef.current = p;
+      setPlayer(p);
+    }
+    return playerRef.current;
+  }, []);
+
+  /* 进详情即预取播放地址（视频详情接口 playUrl，复用视频页同一套取流参数）。
+     延迟一拍再拉取：避免 effect 内同步 setState（react-hooks/set-state-in-effect，同仓库惯例） */
+  useEffect(() => {
+    if (!bvid || !cid) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setUrlLoading(true);
+      setUrlFailed(false);
+      videoApi
+        .playUrl({ bvid, cid })
+        .then((res: any) => {
+          if (cancelled) return;
+          const url = getBestPlayUrl(res?.data);
+          if (url) setPlayUrl(url);
+          else setUrlFailed(true);
+        })
+        .catch(() => {
+          if (!cancelled) setUrlFailed(true);
+        })
+        .finally(() => {
+          if (!cancelled) setUrlLoading(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [bvid, cid]);
+
+  /* 播放状态监听：进度 / 播放中 / 就绪取时长 / 播完归零 */
+  useEffect(() => {
+    if (!playUrl) return;
+    const p = getPlayer();
+    const timeSub = p.addListener('timeUpdate', (e: any) => {
+      if (typeof e.duration === 'number' && e.duration > 0) setDuration(e.duration);
+      setCurrentTime(e.currentTime);
+    });
+    const playingSub = p.addListener('playingChange', (e: any) => {
+      setIsPlaying(!!e.isPlaying);
+    });
+    const statusSub = p.addListener('statusChange', (e: any) => {
+      if (e.status === 'readyToPlay' && p.duration > 0) setDuration(p.duration);
+      if (e.status === 'error') {
+        setPlayFailed(true);
+        setIsPlaying(false);
+      }
+    });
+    const endSub = p.addListener('playToEnd', () => {
+      setIsPlaying(false);
+      p.seekTo(0);
+      setCurrentTime(0);
+    });
+    return () => {
+      timeSub.remove();
+      playingSub.remove();
+      statusSub.remove();
+      endSub.remove();
+    };
+  }, [playUrl, getPlayer]);
+
+  const handlePlay = useCallback(() => {
+    if (!playUrl || urlFailed || playFailed) return;
+    feedBack();
+    const p = getPlayer();
+    setPlayFailed(false);
+    videoStartedRef.current = true;
+    setVideoStarted(true);
+    void p
+      .replaceAsync({ uri: playUrl, headers: { ...PLAYER_HEADERS } })
+      .then(() => {
+        p.play();
+      })
+      .catch(() => {
+        setPlayFailed(true);
+      });
+  }, [playUrl, urlFailed, playFailed, getPlayer]);
+
+  /* 失焦暂停：页面 blur（如 push 视频详情/切后台）即暂停，避免后台出声 */
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        try {
+          playerRef.current?.pause();
+        } catch {}
+      };
+    }, []),
+  );
+  /* 返回校验源（对齐 N1）：共享 AVPlayer 源可能被其他屏 replaceAsync 劫持，
+     重新聚焦时若 sourceUri ≠ 本页源且已点过播放 → 重载并续播 */
+  useFocusEffect(
+    useCallback(() => {
+      const p = playerRef.current;
+      if (!p) return;
+      if (videoStartedRef.current && playUrl && p.sourceUri !== playUrl) {
+        void p
+          .replaceAsync({ uri: playUrl, headers: { ...PLAYER_HEADERS } })
+          .then(() => {
+            p.play();
+          })
+          .catch(() => {});
+      }
+      return undefined;
+    }, [playUrl]),
+  );
+
+  /* 卸载清理：pause + 清空源（N1 语义，释放解码器与前向缓冲） */
+  useEffect(() => {
+    return () => {
+      try {
+        playerRef.current?.pause();
+        void playerRef.current?.replaceAsync(null).catch(() => {});
+      } catch {}
+    };
+  }, []);
+
+  if (!archive || !bvid || !cid) return null;
+
+  const cover = archive.cover || '';
+  const ratio = duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 0;
+  const showSpinner = urlLoading || (videoStarted && !playFailed && !isPlaying && currentTime === 0);
+
+  const handleSeek = (e: GestureResponderEvent) => {
+    if (duration <= 0) return;
+    const w = trackWidthRef.current || 1;
+    const target = Math.min(Math.max((e.nativeEvent.locationX / w) * duration, 0), duration);
+    try {
+      getPlayer().seekTo(target);
+      setCurrentTime(target);
+    } catch {}
+  };
+
+  return (
+    <View style={[styles.inlinePlayerWrap, { backgroundColor: colors.card, ...shadow('md', colors.isDark) }]}>
+      {/* 16:9 播放区 */}
+      <View style={[styles.inlineStage, { backgroundColor: '#000' }]}>
+        {videoStarted && playUrl && player ? (
+          <PiliPlayerView player={player} style={StyleSheet.absoluteFill} videoGravity="contain" />
+        ) : (
+          <View style={StyleSheet.absoluteFill}>
+            {cover ? (
+              <ExpoImage source={{ uri: biliCover(cover, 1280, 720) }} style={StyleSheet.absoluteFill} contentFit="cover" />
+            ) : (
+              <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} />
+            )}
+            <View style={styles.inlineCoverOverlay} />
+          </View>
+        )}
+        {/* 居中大播放键：未开始 / 暂停 / 播放失败时可点 */}
+        {!videoStarted || !isPlaying ? (
+          <Press
+            haptic
+            scaleTo={0.88}
+            onPress={handlePlay}
+            style={[
+              styles.inlinePlayBtn,
+              (urlFailed || playFailed || urlLoading) && styles.inlinePlayBtnDisabled,
+            ]}>
+            {urlLoading && !videoStarted ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="play" size={26} color="#FFFFFF" />
+            )}
+          </Press>
+        ) : null}
+        {/* 右上角：跳转视频详情页（完整播放/弹幕/清晰度） */}
+        <Press
+          haptic
+          scaleTo={0.94}
+          onPress={() => onOpenVideo(bvid)}
+          style={styles.inlineOpenBtn}>
+          <Ionicons name="expand-outline" size={16} color="#FFFFFF" />
+          <Text style={[T.caption2, styles.inlineOpenText]}>视频页</Text>
+        </Press>
+        {/* 播放中缓冲指示 */}
+        {showSpinner && (
+          <View style={styles.inlineBuffering} pointerEvents="none">
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          </View>
+        )}
+        {playFailed && (
+          <Text style={[T.caption1, styles.inlineErr]}>播放失败，可点击重试</Text>
+        )}
+        {urlFailed && (
+          <Text style={[T.caption1, styles.inlineErr]}>无法获取播放地址</Text>
+        )}
+      </View>
+      {/* 底部信息行：标题 + 时长 */}
+      <View style={styles.inlineMeta}>
+        <Text style={[T.footnote, styles.inlineTitle, { color: colors.text }]} numberOfLines={1}>
+          {archive.title || ''}
+        </Text>
+        <Text style={[T.caption2, { color: colors.textTertiary }]}>
+          {duration > 0 ? formatDuration(currentTime) : formatDuration(0)} / {formatDuration(duration)}
+        </Text>
+      </View>
+      {/* 进度条（可点按 seek）：外层 Pressable 只覆盖轨道区域，
+          避免遮挡播放键与右上角"视频页"按钮 */}
+      <Pressable
+        onPress={handleSeek}
+        accessibilityLabel="进度条"
+        style={[styles.inlineTrackWrap]}>
+        <View
+          style={[styles.inlineTrack, { backgroundColor: colors.fill3 }]}
+          onLayout={(e) => {
+            trackWidthRef.current = e.nativeEvent.layout.width;
+          }}>
+          <View style={[styles.inlineTrackFill, { width: `${ratio * 100}%` }]} />
+        </View>
+      </Pressable>
+    </View>
+  );
+}
 
 export default function DynamicDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -383,6 +674,13 @@ export default function DynamicDetailScreen() {
     Alert.alert('动态操作', undefined, actions);
   };
 
+  const handleOpenVideo = useCallback(
+    (bvid: string) => {
+      router.push({ pathname: '/video/[id]', params: { id: bvid } });
+    },
+    [router],
+  );
+
   return (
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       <Stack.Screen options={{ title: detailTitle, headerShown: true, headerLargeTitle: false }} />
@@ -396,7 +694,17 @@ export default function DynamicDetailScreen() {
           <Host matchContents><ProgressView /></Host>
         </View>
       ) : detail ? (
-        <DynamicDetailBody
+        <>
+          {/* batch-5 P1：视频类动态顶部内联播放器（独立实例，见 DynamicInlinePlayer 注释） */}
+          <DynamicInlinePlayer
+            detail={detail}
+            colors={colors}
+            T={T}
+            onOpenVideo={handleOpenVideo}
+          />
+          {/* 内联播放器固定顶部，详情内容在下方独立滚动（FlashList 需有界高度） */}
+          <View style={styles.bodyWrap}>
+          <DynamicDetailBody
           scrollRef={scrollRef}
           detail={detail}
           author={author}
@@ -439,7 +747,9 @@ export default function DynamicDetailScreen() {
           commentCount={stat?.comment?.count || 0}
           onLoadMoreComments={() => loadComments(true)}
           onRetryComments={() => loadComments()}
-        />
+          />
+          </View>
+        </>
       ) : (
         <View style={styles.loadingWrap}>
           <Text style={[T.footnote, styles.empty, { color: colors.textTertiary }]}>加载失败</Text>
@@ -453,4 +763,89 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   empty: { textAlign: 'center', marginTop: 30 },
+  /* 详情内容区：内联播放器固定顶部后，FlashList 需有界高度才能独立滚动 */
+  bodyWrap: { flex: 1 },
+  /* ===== 动态详情内联播放器（batch-5 P1）===== */
+  inlinePlayerWrap: {
+    borderRadius: RADII.lg,
+    overflow: 'hidden',
+  },
+  /* 16:9 播放区：高 = 宽 * 9/16，由外层 flex 宽度撑起 */
+  inlineStage: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+  },
+  inlineCoverOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  inlinePlayBtn: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -27,
+    marginLeft: -27,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  inlinePlayBtnDisabled: { opacity: 0.6 },
+  inlineOpenBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: RADII.circle,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  inlineOpenText: { color: '#FFFFFF', fontWeight: '600' },
+  inlineBuffering: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -12,
+    marginLeft: -12,
+  },
+  inlineErr: {
+    position: 'absolute',
+    bottom: 8,
+    left: 12,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  inlineMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    gap: 10,
+  },
+  inlineTitle: { flex: 1, fontWeight: '600' },
+  inlineTrackWrap: {
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 12,
+    height: 20,
+    justifyContent: 'center',
+  },
+  inlineTrack: {
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  inlineTrackFill: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: ACCENT,
+  },
 });

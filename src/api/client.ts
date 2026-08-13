@@ -1,5 +1,4 @@
 import { HttpString } from './constants';
-import { getAccessKey } from '@/utils/cookie';
 import { USER_AGENT, BASE_HEADERS, TRACE_ID, signAppParamsAsync } from '@/utils/app-sign';
 import { useAuthStore } from '@/stores/auth';
 import { buildNativeRequestOptions } from '@/utils/native-request';
@@ -28,6 +27,22 @@ export interface RequestConfig {
   responseType?: 'text' | 'arraybuffer' | 'json';
   rawResponse?: boolean;
   cancelToken?: NativeRequestCancelToken;
+  /** 业务 code!==0 时抛 ApiError（默认不抛，保持既有 res?.code 判断兼容） */
+  strictCode?: boolean;
+}
+
+/** 统一网络错误结构（批次2#21 API 侧）：HTTP 非 2xx / strictCode 业务错误均抛此类型。 */
+export class ApiError extends Error {
+  readonly code: number;
+  readonly status: number;
+  readonly data?: any;
+  constructor(code: number, message: string, status = -1, data?: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.status = status;
+    this.data = data;
+  }
 }
 
 function serializeParams(params?: Record<string, any>): string {
@@ -35,6 +50,22 @@ function serializeParams(params?: Record<string, any>): string {
 }
 
 const IDENTITY_PARAM_KEYS = new Set(['access_key', 'csrf', 'csrf_token', 'bili_jct']);
+
+/** web 请求 UA（对齐 Flutter init.dart：Dart/3.6），消除安卓 BiliDroid UA 混搭指纹（03-R2） */
+const WEB_UA = 'Dart/3.6 (dart:io)';
+
+/** 生成 x-bili-aurora-eid（对齐 Flutter IdUtils.genAuroraEid：mid 逐字节异或 + base64 去 '='） */
+function genAuroraEid(mid: number): string {
+  if (!mid || mid <= 0) return '';
+  const bytes = new TextEncoder().encode(String(mid));
+  const key = 'ad1va46a7lza';
+  for (let i = 0; i < bytes.length; i++) bytes[i] ^= key.charCodeAt(i % key.length);
+  try {
+    return btoa(String.fromCharCode(...bytes)).replace(/=+$/, '');
+  } catch {
+    return '';
+  }
+}
 
 function stripIdentityFields(record: Record<string, any>): Record<string, any> {
   const next: Record<string, any> = {};
@@ -62,17 +93,31 @@ async function buildNativeHeaders(
   const { anonymousMode } = useAuthStore.getState();
   // 无痕模式：任何 B 站请求都不携带账号 Cookie/access_key（登录响应由 JS 手动落盘）。
   const skipCookies = anonymousMode;
+  const baseURL = client.baseURL || '';
+  // R2（03-1.3）：风控指纹头对全部 bilibili 域统一注入（Flutter baseHeaders），
+  // 消除 api.bilibili.com / api.vc / message 缺头导致的间歇性 -352 空数据。
   const headers: Record<string, string> = {
-    'User-Agent': USER_AGENT,
+    'User-Agent': WEB_UA,
     'Accept-Encoding': 'gzip, deflate',
+    'env': 'prod',
+    'app-key': 'android64',
+    'x-bili-aurora-zone': 'sh001',
     ...BASE_HEADERS,
   };
 
-  if (client.baseURL.includes('app.bilibili.com')) {
-    headers['app-key'] = 'android64';
-    headers['x-bili-aurora-zone'] = 'sh001';
+  // 登录态指纹：x-bili-mid 用真实 mid 数字（不再是布尔字符串），并补 aurora-eid。
+  const auth = useAuthStore.getState();
+  const mid = auth.userInfo?.mid;
+  if (!anonymousMode && mid && mid > 0) {
+    headers['x-bili-mid'] = String(mid);
+    const eid = genAuroraEid(mid);
+    if (eid) headers['x-bili-aurora-eid'] = eid;
+  }
+
+  if (baseURL.includes('app.bilibili.com')) {
+    // app 域仍用安卓客户端 UA，配合 appSign 与 app-key 头
+    headers['User-Agent'] = USER_AGENT;
     headers['x-bili-trace-id'] = TRACE_ID;
-    headers['x-bili-mid'] = getAccessKey() && !anonymousMode ? '1' : '0';
   }
 
   if (config?.headers) {
@@ -171,7 +216,7 @@ async function nativeRequest<T = any>(
   if (config?.rawResponse && isBinaryResponse) {
     const result = await nativeBinaryRequestWithHeadersAsync(options, binaryBody);
     if (!result) throw new Error('原生请求无响应');
-    if (!result.ok) throw new Error(`原生请求失败: HTTP ${result.status}`);
+    if (!result.ok) throw new ApiError(result.status, `请求失败: HTTP ${result.status}`, result.status);
     return {
       status: result.status,
       headers: result.headers,
@@ -187,7 +232,15 @@ async function nativeRequest<T = any>(
 
   const result = await nativeRequestAsync(options, binaryBody);
   if (!result) throw new Error('原生请求无响应');
-  if (!result.ok) throw new Error(`原生请求失败: HTTP ${result.status}`);
+
+  // 错误归一化（批次2#21 API 侧）：HTTP 非 2xx 统一抛 ApiError（带 code+message+status），
+  // 兼容既有 catch；业务 code!==0 保持返回 body（调用方 res?.code 判断不受影响）。
+  if (!result.ok) {
+    const body: any = result.data && typeof result.data === 'object' ? result.data : null;
+    const code = typeof body?.code === 'number' ? body.code : -1;
+    const message = body?.message || `请求失败: HTTP ${result.status}`;
+    throw new ApiError(code, message, result.status, body);
+  }
 
   if (config?.rawResponse) {
     return {
@@ -197,7 +250,11 @@ async function nativeRequest<T = any>(
     } as T;
   }
 
-  return (result.data || {}) as T;
+  const body: any = result.data || {};
+  if (config?.strictCode && typeof body?.code === 'number' && body.code !== 0) {
+    throw new ApiError(body.code, body.message || `业务错误 code=${body.code}`, result.status, body);
+  }
+  return body as T;
 }
 
 export async function get<T = any>(

@@ -18,6 +18,10 @@ import {
 
 const RECOMMEND_CACHE_SAVE_INTERVAL = 2000;
 const RECOMMEND_CACHE_LIMIT = 50;
+/* feed 数组上限：无限滚动后仅保留最近 ~400 条，防止 JS 侧 item 数组无限增长
+   （FlashList 的 keyIndex 映射与 diff 成本随之上升，参照直播弹幕 MAX_ITEMS=50 的做法）。
+   注意 keyExtractor 保持稳定——只截断，不重排剩余项。 */
+const MAX_FEED_ITEMS = 400;
 
 function parsePgcSeasonId(url: string): number {
   const match = (url || '').match(/ss(\d+)/);
@@ -29,6 +33,8 @@ export function useRcmdFeed() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  /* 首屏/换一批请求失败标记：供页面在"列表为空"时渲染 ErrorState（06-H1） */
+  const [error, setError] = useState(false);
   const [activeCategory, setActiveCategory] = useState<Category>('推荐');
   const [activePartitionIdx, setActivePartitionIdx] = useState(0);
   const hotPageRef = useRef(0);
@@ -85,6 +91,8 @@ export function useRcmdFeed() {
       const token = createNativeRequestCancelToken();
       cancelTokenRef.current?.abort();
       cancelTokenRef.current = token;
+      /* 每次发起请求先清掉上一次的失败标记，避免"换分类/重试"期间残留旧错误遮罩 */
+      setError(false);
       try {
         if (isRefresh) setRefreshing(true);
         else setLoadingMore(true);
@@ -151,11 +159,13 @@ export function useRcmdFeed() {
               const history = videos.filter((v) => !v.__marker);
               if (history.length > 0) {
                 setLastRefreshAt(s.savedRcmdTip ? items.length : null);
-                setVideos([
-                  ...items,
-                  ...(s.savedRcmdTip ? [{ __marker: true } as VideoItem] : []),
-                  ...history,
-                ]);
+                setVideos(
+                  [
+                    ...items,
+                    ...(s.savedRcmdTip ? [{ __marker: true } as VideoItem] : []),
+                    ...history,
+                  ].slice(0, MAX_FEED_ITEMS),
+                );
               } else {
                 setLastRefreshAt(null);
                 setVideos(items);
@@ -165,7 +175,7 @@ export function useRcmdFeed() {
               setVideos(items);
             }
           } else {
-            setVideos((prev) => [...prev, ...items]);
+            setVideos((prev) => [...prev, ...items].slice(-MAX_FEED_ITEMS));
           }
           freshIdxRef.current++;
           if (s.enableSaveLastData && items.length > 0) {
@@ -293,13 +303,16 @@ export function useRcmdFeed() {
           }
           items = items.map((i) => ({ ...i, pic: biliCover(i.pic, COVER_W[s.feedLayout]) }));
           if (activeCategory === '热门' && !isRefresh) {
-            setVideos((prev) => [...prev, ...items]);
+            setVideos((prev) => [...prev, ...items].slice(-MAX_FEED_ITEMS));
           } else {
             setVideos(items);
           }
         }
       } catch (e) {
-        if (!token.aborted) console.error('fetchVideos error:', e);
+        if (!token.aborted) {
+          setError(true);
+          console.error('fetchVideos error:', e);
+        }
       } finally {
         if (cancelTokenRef.current === token) cancelTokenRef.current = null;
         if (!token.aborted) {
@@ -348,6 +361,7 @@ export function useRcmdFeed() {
     loading,
     refreshing,
     loadingMore,
+    error,
     activeCategory,
     activePartitionIdx,
     selectCategory,

@@ -12,9 +12,7 @@ import { semanticColor } from '@/theme/semantic-colors';
 
 export function Host(props: React.ComponentProps<typeof OriginalHost>) {
   const scheme = useColorScheme();
-  const enableDynamicColor = useSettingsStore((s) => s.enableDynamicColor);
-  const accentColor = useSettingsStore((s) => s.accentColor);
-  const accent = enableDynamicColor ? ACCENT : (accentColor || ACCENT);
+  const accent = useAccent();
   return (
     <OriginalHost
       seedColor={accent}
@@ -24,8 +22,31 @@ export function Host(props: React.ComponentProps<typeof OriginalHost>) {
   );
 }
 
-/** B站品牌粉（仅用于激活态/品牌标识）；默认值来自设置主题色，不再在组件内写死。 */
+/**
+ * B站品牌粉（仅用于激活态/品牌标识）；默认值来自设置主题色，不再在组件内写死。
+ * 注意：这是模块加载时求值一次的**快照**，仅供模块级默认值兜底使用。
+ * 需要跟随主题色实时变化的组件请改用 useAccent() hook（#38），
+ * 否则在设置页切换主题色后不会跟随（旧 ACCENT 断裂问题）。
+ */
 export const ACCENT = useSettingsStore.getState().accentColor;
+
+/**
+ * 动态主题色 hook（#38）——替代模块级 ACCENT 快照。
+ *
+ * 订阅 useSettingsStore 的 accentColor / enableDynamicColor：
+ * - enableDynamicColor 开启（动态取色）→ 返回系统动态强调色（ACCENT 快照）；
+ * - 否则返回用户自选的 accentColor（缺省回退 ACCENT）。
+ *
+ * 任何消费主题色的组件都应使用本 hook，保证设置页换色后即时重渲染。
+ * 已有组件迁移方式：`import { ACCENT } from '@/components/SwiftUIHost'`
+ * 改为 `import { useAccent } from '@/components/SwiftUIHost'`，在组件内
+ * `const accent = useAccent();`，再把 ACCENT 引用替换为 accent。
+ */
+export function useAccent(): string {
+  const enableDynamicColor = useSettingsStore((s) => s.enableDynamicColor);
+  const accentColor = useSettingsStore((s) => s.accentColor);
+  return enableDynamicColor ? ACCENT : (accentColor || ACCENT);
+}
 
 /** iOS 系统精确色板 - 匹配 Apple HIG 语义色彩
  *  forceDark: 强制深色（如 darkVideoPage 设置下视频页强制深色），不传则跟随应用主题；
@@ -33,10 +54,8 @@ export const ACCENT = useSettingsStore.getState().accentColor;
 export function useThemeColors(forceDark?: boolean) {
   const scheme = useColorScheme();
   const isPureBlack = useSettingsStore((s) => s.isPureBlackTheme);
-  const enableDynamicColor = useSettingsStore((s) => s.enableDynamicColor);
-  const accentColor = useSettingsStore((s) => s.accentColor);
   const isDark = forceDark ?? scheme === 'dark';
-  const accent = enableDynamicColor ? ACCENT : (accentColor || ACCENT);
+  const accent = useAccent();
   const pureBlack = semanticColor('bg', true);
   const card = isDark && isPureBlack ? pureBlack : semanticColor('card', isDark);
   const elevatedCard = isDark && isPureBlack ? pureBlack : semanticColor('elevatedCard', isDark);

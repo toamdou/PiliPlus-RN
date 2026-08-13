@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeColors } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { useType } from '@/components/type-scale';
 import { Press } from '@/components/motion';
 import { useSettingsStore } from '@/stores/settings';
@@ -147,12 +148,11 @@ function BarSortSection({
         const enabled = !!state.enabled[key];
         return (
           <View key={key} style={[styles.row, { borderTopColor: colors.separator }]}>
-            <Switch
+            <IoSToggle
               value={enabled}
               onValueChange={(v) =>
                 onChange({ ...state, enabled: { ...state.enabled, [key]: v } })
               }
-              trackColor={{ true: colors.accent, false: colors.fill3 }}
             />
             <Ionicons name="reorder-three-outline" size={18} color={colors.quaternaryLabel} />
             <Text

@@ -78,9 +78,7 @@ export default function MemberFavoriteScreen() {
         estimatedItemSize={102}
         overrideItemLayout={rowLayout}
         drawDistance={250}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.textSecondary} />}
         ListEmptyComponent={loading ? null : <Text style={[T.headline, styles.empty, { color: colors.text }]}>暂无收藏夹</Text>}
         renderItem={renderRow}

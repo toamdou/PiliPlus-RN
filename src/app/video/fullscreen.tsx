@@ -4,9 +4,10 @@
  * usePlayerStore.fullscreenState 传递，退出时写回并桥接回主页面（对齐 Flutter 独立全屏页）。
  */
 import { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { PiliPlayer, PiliPlayerView } from 'pili-player';
 import { EnhancedVideoView } from 'pili-video-enhance';
 import { GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -14,6 +15,7 @@ import { Press } from '@/components/motion';
 import { DanmakuOverlay } from '@/components/DanmakuOverlay';
 import { SubtitleOverlay } from '@/components/SubtitleOverlay';
 import { useSettingsStore } from '@/stores/settings';
+import { showToast } from '@/utils/toast';
 import {
   useNativeFullscreenPlayer,
   type FullscreenPlayerController,
@@ -40,6 +42,8 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
     onEnhancementStateChange,
     currentTime,
     duration,
+    buffering,
+    playError,
     onPreviewTime,
     commitSeek,
     coverShown,
@@ -63,6 +67,8 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
     videoInfo,
     playerWidthSV,
     tapGesture,
+    videoGravity,
+    gestureHud,
     handleDmDensityChange,
     togglePlay,
     toggleLock,
@@ -134,7 +140,7 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
                 <EnhancedVideoView
                   playerId={nativePlayerId}
                   options={enhanceOptions ?? undefined}
-                  contentFit="contain"
+                  contentFit={videoGravity}
                   safeAreaInsets={safePadding}
                   onFirstFrameRender={() => setCoverShown(false)}
                   onError={onEnhancementError}
@@ -144,7 +150,7 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
               ) : (
                 <PiliPlayerView
                   player={player}
-                  videoGravity="contain"
+                  videoGravity={videoGravity}
                   style={StyleSheet.absoluteFill}
                 />
               )}
@@ -162,6 +168,22 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
                 />
               )}
               <SubtitleOverlay subtitles={subtitleData} visible={subtitleVisible} isFullscreen />
+              {/* 手势 HUD（04-B2：原生 HUD 已移除，亮度/音量反馈统一走 RN 侧） */}
+              {gestureHud && (
+                <View pointerEvents="none" style={styles.gestureHudWrap}>
+                  <View style={styles.gestureHudCard}>
+                    <Ionicons
+                      name={gestureHud.type === 'brightness' ? 'sunny' : 'volume-high'}
+                      size={20}
+                      color="#FFFFFF"
+                    />
+                    <View style={styles.gestureHudBar}>
+                      <View style={[styles.gestureHudFill, { height: `${gestureHud.value * 100}%` }]} />
+                    </View>
+                    <Text style={styles.gestureHudText}>{Math.round(gestureHud.value * 100)}%</Text>
+                  </View>
+                </View>
+              )}
             </View>
           </GestureDetector>
         </View>
@@ -224,6 +246,42 @@ function FullscreenVideoBody({ controller }: { controller: FullscreenPlayerContr
           onSubtitleSelect={handleSubtitleSelect}
           onSubtitleClose={handleSubtitleClose}
         />
+
+        {/* 缓冲中指示器（04-P0/3.4）：原生 buffering 事件驱动，居中 spinner，不阻塞交互 */}
+        {buffering ? (
+          <View pointerEvents="none" style={styles.bufferingWrap}>
+            <View style={styles.bufferingChip}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+              <Text style={styles.bufferingText}>缓冲中</Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* 播放错误浮层（04-P0/3.4）：error 事件驱动，提供一键重载 + 退出 */}
+        {playError ? (
+          <View style={styles.errorWrap}>
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>播放出错了</Text>
+              <Text style={styles.errorMsg} numberOfLines={3}>{playError}</Text>
+              <View style={styles.errorRow}>
+                <Press
+                  haptic
+                  scaleTo={0.9}
+                  onPress={reloadSource}
+                  style={[styles.errorBtn, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
+                  <Text style={styles.errorBtnText}>重新加载</Text>
+                </Press>
+                <Press
+                  haptic
+                  scaleTo={0.9}
+                  onPress={exitFullscreen}
+                  style={[styles.errorBtn, { backgroundColor: 'rgba(255,255,255,0.12)' }]}>
+                  <Text style={styles.errorBtnText}>退出全屏</Text>
+                </Press>
+              </View>
+            </View>
+          </View>
+        ) : null}
       </View>
     </GestureHandlerRootView>
   );
@@ -236,7 +294,7 @@ export default function FullscreenVideoScreen() {
   const enableSlideVolumeBrightness = useSettingsStore((s) => s.enableSlideVolumeBrightness);
   const { playUrl, id } = controller;
 
-  // 原生 presented VC 负责方向/状态栏/手势/电量时间标签；RN 全屏叠加层继续覆盖在其上。
+  // 原生 presented VC 负责状态栏/手势/电量时间标签；方向由 expo-screen-orientation 统一接管。
   useEffect(() => {
     if (!playUrl || !id) return;
     let cancelled = false;
@@ -245,7 +303,9 @@ export default function FullscreenVideoScreen() {
       autoRotate,
       enableSlideVolumeBrightness,
     }).catch((error) => {
-      if (!cancelled) throw error;
+      // F2：不再在 catch 内 re-throw（否则产生 unhandled rejection 红屏），
+      // 降级为 toast 提示，功能不受影响。
+      if (!cancelled) showToast(error instanceof Error ? error.message : '全屏打开失败');
     });
     return () => {
       cancelled = true;
@@ -258,4 +318,84 @@ export default function FullscreenVideoScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
+  gestureHudWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  gestureHudCard: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  gestureHudBar: {
+    width: 4,
+    height: 60,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+  },
+  gestureHudFill: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FB7299',
+    borderRadius: 2,
+  },
+  gestureHudText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  bufferingWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  bufferingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+  bufferingText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  errorWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    zIndex: 40,
+  },
+  errorCard: {
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderRadius: 20,
+    backgroundColor: 'rgba(20,20,20,0.85)',
+    maxWidth: 300,
+  },
+  errorTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  errorMsg: { color: 'rgba(255,255,255,0.75)', fontSize: 13, textAlign: 'center' },
+  errorRow: { flexDirection: 'row', gap: 10, marginTop: 6 },
+  errorBtn: { paddingHorizontal: 18, paddingVertical: 9, borderRadius: 999 },
+  errorBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
 });

@@ -20,6 +20,7 @@ import { RADII, continuous, shadow } from '@/theme/tokens';
 import { type FlashListItemLayout } from '@/utils/list-layout';
 import { showToast } from '@/utils/toast';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
 
 interface Session {
   talker_id: number;
@@ -401,9 +402,7 @@ export default function WhisperScreen() {
           getItemType={getItemType}
           estimatedItemSize={76}
           overrideItemLayout={overrideItemLayout}
-          windowSize={9}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
+          drawDistance={250}
           overrideProps={{ initialDrawBatchSize: 10 }}
           contentContainerStyle={[styles.listContent, sessions.length > 0 && { backgroundColor: colors.card, borderRadius: RADII.lg, marginHorizontal: 14, marginTop: 12, ...continuous }]}
           showsVerticalScrollIndicator={false}
@@ -418,13 +417,11 @@ export default function WhisperScreen() {
           }
           ListEmptyComponent={
             loading ? null : (
-              <View style={styles.emptyWrap}>
-                <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                  <Ionicons name="chatbubbles-outline" size={38} color={colors.textTertiary} />
-                </View>
-                <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无私信</Text>
-                <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>快去和 UP 主互动吧</Text>
-              </View>
+              <EmptyState
+                icon="chatbubbles-outline"
+                title="暂无私信"
+                subtitle="快去和 UP 主互动吧"
+              />
             )
           }
           renderItem={renderItem}
@@ -475,11 +472,6 @@ const styles = StyleSheet.create({
   lastMsg: { flexShrink: 1 },
   badge: { backgroundColor: '#FF3B30', borderRadius: RADII.sm, minWidth: 20, height: 20, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, ...continuous },
   badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
   /* 骨架 */
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
   /* 删除撤销 */

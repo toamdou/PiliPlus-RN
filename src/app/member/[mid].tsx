@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Host, ProgressView } from '@expo/ui/swift-ui';
 import { Stack, useLocalSearchParams, useRouter, useScrollToTop } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,7 @@ import { av2bv } from '@/utils/id-utils';
 import { useAuthStore } from '@/stores/auth';
 import { useSettingsStore } from '@/stores/settings';
 import { feedBack } from '@/utils/feedback';
+import { showToast } from '@/utils/toast';
 import { Press } from '@/components/motion';
 import { RADII, continuous } from '@/theme/tokens';
 import { TabError } from '@/components/member/tab-states';
@@ -23,11 +24,21 @@ const SPACE_TAB_MAP: Record<string, MemberTab> = {
   home: 'videos',
   dynamic: 'dynamics',
   contribute: 'videos',
+  like: 'like',
   favorite: 'favorite',
   bangumi: 'bangumi',
   cheese: 'cheese',
   shop: 'shop',
 };
+
+/** 举报 UP 主原因（reason 文案直传 spaceBaseUrl/ajax/report/add） */
+const REPORT_REASONS = [
+  '涉政违法',
+  '色情低俗',
+  '垃圾广告',
+  '人身攻击',
+  '违法违规',
+];
 
 export default function MemberScreen() {
   const { mid } = useLocalSearchParams<{ mid: string }>();
@@ -47,6 +58,9 @@ export default function MemberScreen() {
   const [coinVideos, setCoinVideos] = useState<VideoItem[]>([]);
   const [coinsLoading, setCoinsLoading] = useState(false);
   const [coinsError, setCoinsError] = useState<string | null>(null);
+  const [likeVideos, setLikeVideos] = useState<VideoItem[]>([]);
+  const [likesLoading, setLikesLoading] = useState(false);
+  const [likesError, setLikesError] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   /* 动态分页游标（对齐 Flutter MemberDynamicsController.offset） */
   const dynOffsetRef = useRef('');
@@ -135,6 +149,38 @@ export default function MemberScreen() {
     }
   }
 
+  /* 点赞接口不返回 bvid：与投币一致，用 aid（v.aid 或 v.param）av2bv 转换，兜底从 uri 提取 BV 号 */
+  function likeBvid(v: any): string {
+    const aid = Number(v?.aid ?? v?.param);
+    if (Number.isFinite(aid) && aid > 0) return av2bv(aid);
+    const m = /BV[0-9A-Za-z]+/.exec(v?.uri || '');
+    return m ? m[0] : '';
+  }
+
+  /* 最近点赞（member_like_arc，对齐 Flutter lib/pages/member_like_arc：
+     app 接口 /x/v2/space/likearc，data.list 列表，aid/pic/duration/ctime 字段） */
+  async function loadLikes() {
+    setLikesLoading(true);
+    setLikesError(null);
+    try {
+      const res = await userApi.likeArc({ mid: parseInt(mid) });
+      const list = res?.data?.list || res?.data?.item || [];
+      setLikeVideos(list.map((v: any) => ({
+        bvid: likeBvid(v),
+        title: v.title || '',
+        pic: v.pic || v.cover || '',
+        play: v.play || 0,
+        created: v.ctime || 0,
+        length: v.duration ? formatDuration(v.duration) : '',
+      })));
+    } catch (e) {
+      console.error('loadLikes error:', e);
+      setLikesError(errMsg(e));
+    } finally {
+      setLikesLoading(false);
+    }
+  }
+
   async function loadMember() {
     setLoading(true);
     setPageError(null);
@@ -143,6 +189,8 @@ export default function MemberScreen() {
     setStat(null);
     setCoinVideos([]);
     setCoinsError(null);
+    setLikeVideos([]);
+    setLikesError(null);
     setIsFollowed(false);
     setSpaceTabs(null);
     dynOffsetRef.current = '';
@@ -213,6 +261,13 @@ export default function MemberScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, loading]);
 
+  useEffect(() => {
+    if (!(activeTab === 'like' && likeVideos.length === 0 && mid)) return;
+    const timer = setTimeout(() => loadLikes(), 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, loading]);
+
   const toggleFollow = useCallback(async () => {
     if (!isLoggedIn) { router.push('/login' as any); return; }
     feedBack();
@@ -221,9 +276,95 @@ export default function MemberScreen() {
     await userApi.modifyRelation({ fid: parseInt(mid), act: newFollow ? 1 : 2 }).catch(() => setIsFollowed(!newFollow));
   }, [isLoggedIn, isFollowed, mid, router]);
 
+  /* ===== 批次5 P2：空间头部右上角菜单（分享UP主/拉黑/举报/私信入口） =====
+   * 对齐 Flutter member 头部更多菜单；分享走系统分享（站外）或站内分享选人面板（/contact/share）。 */
+  const handleShareUp = useCallback(() => {
+    if (!info?.name) { showToast('UP 主信息未加载'); return; }
+    router.push({
+      pathname: '/contact/share',
+      params: {
+        cardType: 'space',
+        cardId: String(mid),
+        cardTitle: `UP主：${info.name}`,
+        cardCover: info.face || '',
+        cardUri: `https://space.bilibili.com/${mid}`,
+        cardUpperMid: String(mid),
+        cardUpperName: info.name,
+      },
+    } as any);
+  }, [info, mid, router]);
+
+  /** 系统分享（站外复制/转发兜底） */
+  const handleSystemShare = useCallback(() => {
+    const name = info?.name || `UP主 ${mid}`;
+    void Share.share({ message: `【${name}】https://space.bilibili.com/${mid}` }).catch(() => {});
+  }, [info, mid]);
+
+  /** 拉黑（对齐 blacklist：modifyRelation act=5 拉黑 / act=6 解除，csrftoken 由 userApi 统一补） */
+  const handleBlack = useCallback(() => {
+    if (!isLoggedIn) { router.push('/login' as any); return; }
+    Alert.alert('拉黑该用户', '拉黑后将不再看到 TA 的内容，可在设置-黑名单中解除。确定继续吗？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '拉黑',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const res = await userApi.modifyRelation({ fid: parseInt(mid), act: 5, re_src: 11 });
+            if (res?.code === 0) showToast('已拉黑');
+            else showToast(res?.message || '拉黑失败');
+          } catch {
+            showToast('拉黑失败，请重试');
+          }
+        },
+      },
+    ]);
+  }, [isLoggedIn, mid, router]);
+
+  /** 举报（对齐 Flutter report 分支；reason 文案直传 spaceBaseUrl/ajax/report/add） */
+  const handleReport = useCallback(() => {
+    if (!isLoggedIn) { router.push('/login' as any); return; }
+    Alert.alert('举报该用户', '请选择举报原因', [
+      ...REPORT_REASONS.map((reason) => ({
+        text: reason,
+        onPress: async () => {
+          try {
+            const res = await userApi.reportMember({ mid: parseInt(mid), reason });
+            showToast(res?.code === 0 ? '举报已提交' : res?.message || '举报失败');
+          } catch {
+            showToast('举报失败，请重试');
+          }
+        },
+      })),
+      { text: '取消', style: 'cancel' },
+    ]);
+  }, [isLoggedIn, mid, router]);
+
+  /** 私信入口（跳 /whisper/[uid]） */
+  const handleWhisper = useCallback(() => {
+    if (!isLoggedIn) { router.push('/login' as any); return; }
+    router.push({ pathname: '/whisper/[uid]', params: { uid: String(mid) } } as any);
+  }, [isLoggedIn, mid, router]);
+
   /* 显示UP主页小店TAB（showMemberShop=false 时隐藏商店 tab） */
   const showMemberShop = useSettingsStore((s2) => s2.showMemberShop);
   const isOwner = userInfo?.mid === parseInt(mid, 10);
+
+  /* 头部右上角菜单按钮（SwiftUI Stack.Toolbar.Menu 既有模式，仅非本人空间展示） */
+  const headerMenu = useMemo(() => {
+    if (loading || pageError || isOwner) return null;
+    return (
+      <Stack.Toolbar>
+        <Stack.Toolbar.Menu icon="ellipsis.circle" accessibilityLabel="更多">
+          <Stack.Toolbar.MenuAction onPress={handleShareUp}>分享 UP 主（站内）</Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction onPress={handleSystemShare}>分享 UP 主（系统）</Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction onPress={handleWhisper}>发私信</Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction destructive onPress={handleBlack}>拉黑</Stack.Toolbar.MenuAction>
+          <Stack.Toolbar.MenuAction destructive onPress={handleReport}>举报</Stack.Toolbar.MenuAction>
+        </Stack.Toolbar.Menu>
+      </Stack.Toolbar>
+    );
+  }, [loading, pageError, isOwner, handleShareUp, handleSystemShare, handleWhisper, handleBlack, handleReport]);
 
   const tabs = useMemo(() => {
     if (spaceTabs && spaceTabs.length > 0) return spaceTabs;
@@ -273,6 +414,7 @@ export default function MemberScreen() {
     <View style={[styles.root, { backgroundColor: colors.bg }]}>
       {/* 用户明确不需要文字显示用户名（large title 会遮挡资料卡），仅保留 card 内展示 */}
       <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
+      {headerMenu}
       {loading ? (
         <View style={styles.loadingWrap}>
           <Host matchContents><ProgressView /></Host>
@@ -290,6 +432,7 @@ export default function MemberScreen() {
           videos={videos}
           dynamics={dynamics}
           coinVideos={coinVideos}
+          likeVideos={likeVideos}
           videosLoadingMore={videosLoadingMore}
           dynLoadingMore={dynLoadingMore}
           videosError={videosError}
@@ -297,11 +440,14 @@ export default function MemberScreen() {
           dynError={dynError}
           coinsLoading={coinsLoading}
           coinsError={coinsError}
+          likesLoading={likesLoading}
+          likesError={likesError}
           onLoadMoreVideos={videosLoadMore}
           onLoadMoreDynamics={dynLoadMore}
           onRetryVideos={videosRefresh}
           onRetryDynamics={dynRefresh}
           onRetryCoins={loadCoins}
+          onRetryLikes={loadLikes}
         />
       )}
     </View>

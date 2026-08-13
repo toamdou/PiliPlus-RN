@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSettingsStore } from '@/stores/settings';
@@ -12,14 +12,14 @@ import {
   bindPlayer,
   cancelDanmakuLoadAsync,
   loadAndPrepareDanmakuAsync,
+  releaseDanmakuRefAsync,
   PiliDanmakuOverlay,
   type DanmakuLoadOptions,
+  type DanmakuMode,
   type DanmakuTapEvent,
   type PreparedDanmaku,
 } from 'pili-danmaku';
 
-/** 顶部/底部弹幕停留秒数（对齐 Flutter danmakuStaticDuration 默认 4.0） */
-const STATIC_DURATION = 4;
 /** 常驻弹幕列表上限（只保留最近 6000 条，控制内存） */
 const MAX_RESIDENT_DANMAKU = 6000;
 /** 高能进度条分桶粒度（秒） */
@@ -65,7 +65,7 @@ const EMPTY_FILTER_RULES: FilterRules = {
   users: new Set(),
 };
 
-const EMPTY_PREPARED: PreparedDanmaku = { items: [], density: [] };
+const EMPTY_PREPARED: PreparedDanmaku = { token: '', density: [] };
 
 const DM_REPORT_REASONS = [
   { label: '违法违规', reason: 1 },
@@ -126,6 +126,8 @@ export function DanmakuOverlay({
   const [filterRules, setFilterRules] = useState<FilterRules>(EMPTY_FILTER_RULES);
   const [dmMenu, setDmMenu] = useState<{ item: DanmakuMenuItem; report: boolean } | null>(null);
   const [prepared, setPrepared] = useState<PreparedDanmaku>(EMPTY_PREPARED);
+  // 01-M3（P1）：记录当前已应用到原生的 token，卸载/重载时释放原生侧的条目引用。
+  const activeTokenRef = useRef('');
 
   // 订阅渲染所需设置（设置页改动可实时生效）
   const dmEnabled = useSettingsStore((s) => s.danmakuEnabled);
@@ -137,6 +139,15 @@ export function DanmakuOverlay({
   const showVipDm = useSettingsStore((s) => s.showVipDanmaku);
   const showChart = useSettingsStore((s) => s.showDmChart);
   const tapDm = useSettingsStore((s) => s.enableTapDm);
+  // 批次5 P1：弹幕设置补齐（02-2.3）——显示区域/描边/静态时长/按类型屏蔽。
+  const dmArea = useSettingsStore((s) => s.dmArea);
+  const dmStrokeWidth = useSettingsStore((s) => s.dmStrokeWidth);
+  const dmStrokeColor = useSettingsStore((s) => s.dmStrokeColor);
+  const dmStaticDuration = useSettingsStore((s) => s.dmStaticDuration);
+  const dmBlockScroll = useSettingsStore((s) => s.dmBlockScroll);
+  const dmBlockTop = useSettingsStore((s) => s.dmBlockTop);
+  const dmBlockBottom = useSettingsStore((s) => s.dmBlockBottom);
+  const dmBlockColorful = useSettingsStore((s) => s.dmBlockColorful);
   const { isLoggedIn } = useAuthStore();
 
   // 原生路径绑定共享 AVPlayer 作为弹幕时钟源，时间由原生媒体时钟驱动。
@@ -160,7 +171,7 @@ export function DanmakuOverlay({
       showVipDm,
       dmFontSize,
       dmSpeed,
-      staticDuration: STATIC_DURATION,
+      staticDuration: dmStaticDuration,
       maxResident: MAX_RESIDENT_DANMAKU,
       densityBucketSec: DENSITY_BUCKET_SEC,
       densityMinLevel: DENSITY_MIN_LEVEL,
@@ -171,20 +182,33 @@ export function DanmakuOverlay({
     });
     loadAndPrepareDanmakuAsync(cid, options, token.id)
       .then((result) => {
-        if (!cancelled && !token.aborted) setPrepared(result);
+        if (!cancelled && !token.aborted) {
+          setPrepared(result);
+          activeTokenRef.current = result.token || '';
+        }
       })
       .catch(() => {
-        if (!cancelled && !token.aborted) setPrepared(EMPTY_PREPARED);
+        if (!cancelled && !token.aborted) {
+          setPrepared(EMPTY_PREPARED);
+          activeTokenRef.current = '';
+        }
       });
     return () => {
       cancelled = true;
       token.abort();
+      // 01-M3（P1）：释放旧 token 引用的原生 prepared 结果，避免 JS 重载后原生侧残留整包条目。
+      const previousToken = activeTokenRef.current;
+      if (previousToken) {
+        activeTokenRef.current = '';
+        void releaseDanmakuRefAsync(previousToken);
+      }
     };
   }, [
     cid,
     dmEnabled,
     dmFontSize,
     dmSpeed,
+    dmStaticDuration,
     duration,
     filterRules,
     mergeDanmaku,
@@ -203,7 +227,20 @@ export function DanmakuOverlay({
     };
   }, [cid]);
 
-  const activePrepared = !dmEnabled || duration <= 0 ? EMPTY_PREPARED : prepared;
+  // 01-M3（P1）：JS 只持有原生 prepared 结果的 token，6000 条上屏条目整体留在原生，
+  // 不再序列化回 JS（原先的 items useState + 二次序列化回原生 = 三份驻留已消除）。
+  // 批次5 P3：PiP 激活状态订阅（「画中画不加载弹幕」）——小窗开启时暂停弹幕层渲染。
+  // 通过 PiliDanmakuOverlay 的 visible=false 让原生停止 spawn，最小改动、不动原生弹幕引擎。
+  const [pipActive, setPipActive] = useState(false);
+  const enablePiPNoDanmaku = useSettingsStore((s) => s.enablePiPNoDanmaku);
+  useEffect(() => {
+    const sub = PiliPlayer.shared.addListener('pictureInPictureActiveChange', (e) => {
+      setPipActive(!!e.active);
+    });
+    return () => sub.remove();
+  }, []);
+
+  const activeToken = !dmEnabled || duration <= 0 ? '' : prepared.token;
 
   // 高能进度条密度标记：showDmChart 开启时回传给父级进度条渲染
   const densityMarkers = useMemo(
@@ -339,17 +376,32 @@ export function DanmakuOverlay({
 
   if (!dmEnabled || !visible) return null;
 
+  // 批次5 P3：PiP 小窗激活且设置开启「画中画不加载弹幕」时，弹幕层整体隐藏（原生停止上屏）。
+  const pipHidden = enablePiPNoDanmaku && pipActive;
+
+  // 批次5 P1：按类型屏蔽转成原生 mode 集合（preparer 已把 2/3 归 scroll、4 归 bottom、5/6/7 归 top）。
+  const blockModes: DanmakuMode[] = [
+    ...(dmBlockScroll ? (['scroll'] as const) : []),
+    ...(dmBlockTop ? (['top'] as const) : []),
+    ...(dmBlockBottom ? (['bottom'] as const) : []),
+  ];
+
   return (
     <View style={[styles.container, { top: topInset, height }]}>
       <PiliDanmakuOverlay
         style={StyleSheet.absoluteFill}
-        items={activePrepared.items}
-        visible
+        itemsRef={activeToken}
+        visible={!pipHidden}
         density={1}
         height={height}
         opacity={dmOpacity}
         speed={dmSpeed}
         lineHeight={dmLineHeight}
+        area={dmArea}
+        strokeWidth={dmStrokeWidth}
+        strokeColor={dmStrokeColor}
+        blockModes={blockModes}
+        blockColorful={dmBlockColorful}
         interactive={tapDm}
         pointerEvents={tapDm ? 'auto' : 'none'}
         onDanmakuTap={handleNativeDanmakuTap}

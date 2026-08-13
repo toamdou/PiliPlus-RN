@@ -12,6 +12,8 @@ import { useType } from '@/components/type-scale';
 import { RADII, continuous, shadow } from '@/theme/tokens';
 import { feedBackMedium } from '@/utils/feedback';
 import { fixedItemLayout } from '@/utils/list-layout';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const rowLayout = fixedItemLayout(48);
 
@@ -133,29 +135,13 @@ export default function SearchTrendingScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackMedium(); load(true); }} tintColor={colors.textSecondary} />}
         estimatedItemSize={48}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={16}
-        maxToRenderPerBatch={20}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 16 }}
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>{error}</Text>
-              <Press haptic scaleTo={0.94} onPress={() => load()} style={[styles.retryBtn, { backgroundColor: ACCENT }]}>
-                <Text style={[T.subhead, styles.retryText]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState title={typeof error === 'string' ? error : '加载失败'} onRetry={() => load()} />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="trending-up-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无热搜</Text>
-            </View>
+            <EmptyState icon="trending-up-outline" title="暂无热搜" />
           )
         }
         renderItem={renderItem}
@@ -184,10 +170,5 @@ const styles = StyleSheet.create({
   keyword: { flex: 1, fontWeight: '500' },
   tag: { borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1.5 },
   tagText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  retryBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
-  retryText: { color: '#FFFFFF', fontWeight: '600' },
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 8, gap: 4, ...continuous },
 });

@@ -2,6 +2,7 @@ import { apiClient, appClient, get, post, getWbi, type RequestConfig } from './c
 import { Api } from './endpoints';
 import { signAppParamsAsync } from '@/utils/app-sign';
 import { getCSRF } from '@/utils/cookie';
+import { FORM_HEADERS, formBody } from '@/utils/form';
 import { useSettingsStore } from '@/stores/settings';
 import { useNetwork } from '@/utils/network';
 import { buildDmRiskParams } from '@/utils/player-utils';
@@ -72,13 +73,13 @@ export const videoApi = {
     return fallback;
   },
 
-  // 番剧视频流
-  async pgcPlayUrl(params: { cid: number; bvid?: string; qn?: number; fnval?: number }, config?: RequestConfig) {
+  // 番剧视频流（R1/04-3.9：fnval 由 4048 纯 DASH 改 0 返回 durl 合流，保证 iOS AVPlayer 有声可播）
+  async pgcPlayUrl(params: { cid: number; bvid?: string; ep_id?: number; season_id?: number; qn?: number; fnval?: number }, config?: RequestConfig) {
     const s = useSettingsStore.getState();
     const isWifi = useNetwork.getState().isWifi;
     const qn = params.qn || (isWifi ? s.defaultQuality : s.cellularQuality);
     const fourk = s.p1080 ? 1 : 0;
-    return get(apiClient, Api.pgcUrl, { fnval: 1, fourk, ...params, qn }, config);
+    return get(apiClient, Api.pgcUrl, { fnval: 0, fourk, ...params, qn }, config);
   },
 
   // 播放信息(字幕等)
@@ -104,9 +105,32 @@ export const videoApi = {
     return post(appClient, Api.coinVideo, null, signed);
   },
 
-  // 一键三连
+  // 一键三连（R8：form + csrf + referer/origin，对齐 Flutter ugcTriple）
   async triple(params: { aid?: number; bvid?: string }) {
-    return post(apiClient, Api.ugcTriple, null, { ...params, csrf: getCSRF() });
+    const bvid = params.bvid || '';
+    return post(
+      apiClient,
+      Api.ugcTriple,
+      formBody({
+        aid: params.aid,
+        bvid,
+        eab_x: 2,
+        ramval: 0,
+        source: 'web_normal',
+        ga: 1,
+        csrf: getCSRF() || '',
+        spmid: '333.788.0.0',
+        statistics: '{"appId":100,"platform":5}',
+      }),
+      undefined,
+      {
+        headers: {
+          ...FORM_HEADERS,
+          origin: 'https://www.bilibili.com',
+          referer: bvid ? `https://www.bilibili.com/video/${bvid}` : 'https://www.bilibili.com',
+        },
+      },
+    );
   },
 
   // 举报视频（B站标准举报接口：type=1 视频，rid 资源id，reason_id 1色情低俗 2垃圾广告 3违法违规 4人身攻击）
@@ -114,9 +138,21 @@ export const videoApi = {
     return post(apiClient, Api.videoReport, null, { ...params, csrf: getCSRF() });
   },
 
-  // PGC 一键三连
-  async pgcTriple(params: { season_id: number }) {
-    return post(apiClient, Api.pgcTriple, null, { ...params, csrf: getCSRF() });
+  // PGC 一键三连（R8：form + csrf + referer/origin，对齐 Flutter pgcTriple）
+  async pgcTriple(params: { ep_id: number; season_id?: number }) {
+    return post(
+      apiClient,
+      Api.pgcTriple,
+      formBody({ ep_id: params.ep_id, csrf: getCSRF() || '' }),
+      undefined,
+      {
+        headers: {
+          ...FORM_HEADERS,
+          origin: 'https://www.bilibili.com',
+          referer: `https://www.bilibili.com/bangumi/play/${params.season_id ? `ss${params.season_id}` : `ep${params.ep_id}`}`,
+        },
+      },
+    );
   },
 
   // PGC 点赞
@@ -124,9 +160,16 @@ export const videoApi = {
     return post(apiClient, Api.pgcLikeCoinFav, null, { ...params, csrf: getCSRF() });
   },
 
-  // 收藏
+  // 收藏（R8：form + csrf，对齐 Flutter favVideo）
   async favVideo(params: { rid: number; type: number; add_media_ids?: string; del_media_ids?: string }) {
-    return post(apiClient, Api.favVideo, null, { ...params, csrf: getCSRF() });
+    return post(apiClient, Api.favVideo, formBody({
+      resources: `${params.type}_${params.rid}`,
+      add_media_ids: params.add_media_ids ?? '',
+      del_media_ids: params.del_media_ids ?? '',
+      csrf: getCSRF() || '',
+    }), undefined, {
+      headers: FORM_HEADERS,
+    });
   },
 
   // 获取收藏夹列表

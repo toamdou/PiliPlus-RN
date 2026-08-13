@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Switch, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { msgApi } from '@/api/msg';
 import { useAuthStore } from '@/stores/auth';
 import { Press, Reveal } from '@/components/motion';
@@ -285,13 +286,7 @@ function SettingRow({
         <Ionicons name={icon} size={17} color={colors.text} />
       </View>
       <Text style={[T.subhead, styles.actionLabel, { color: colors.text }]}>{label}</Text>
-      <Switch
-        value={value}
-        disabled={disabled}
-        onValueChange={onValueChange}
-        trackColor={{ false: colors.fill3, true: ACCENT }}
-        thumbColor="#FFFFFF"
-      />
+      <IoSToggle value={value} disabled={disabled} onValueChange={onValueChange} />
     </Press>
   );
 }

@@ -9,14 +9,15 @@
  *  - 禁言规则：liveApi.setSilent（form body：type=rank|verify + level，level 1 开启 / 0 关闭）。
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, KeyboardAvoidingView, Switch, TextInput } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, TextInput } from 'react-native';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
 import { Stack, useLocalSearchParams, useScrollToTop } from 'expo-router';
 import { Host, Picker, Text as SwiftText, ConfirmationDialog, Button as SwiftButton } from '@expo/ui/swift-ui';
 import { pickerStyle, tag } from '@expo/ui/swift-ui/modifiers';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors, useAccent } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { liveApi } from '@/api/live';
 import { useAuthStore } from '@/stores/auth';
 import { showToast } from '@/utils/toast';
@@ -76,6 +77,7 @@ const TABS = [
 
 export default function LiveDmBlockScreen() {
   const colors = useThemeColors();
+  const accent = useAccent();
   const T = useType();
   const insets = useSafeAreaInsets();
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
@@ -283,18 +285,16 @@ export default function LiveDmBlockScreen() {
           <Text style={[T.caption1, styles.rulesTitle, { color: colors.textTertiary }]}>全局屏蔽</Text>
           <View style={styles.switchRow}>
             <Text style={[T.subhead, { color: colors.text }]}>屏蔽非正式会员</Text>
-            <Switch
+            <IoSToggle
               value={rankOn}
               onValueChange={(v) => setSilentRule('rank', v ? 1 : 0, setRankOn)}
-              trackColor={{ true: ACCENT }}
             />
           </View>
           <View style={[styles.switchRow, { borderTopColor: colors.separator, borderTopWidth: StyleSheet.hairlineWidth }]}>
             <Text style={[T.subhead, { color: colors.text }]}>屏蔽未绑定手机用户</Text>
-            <Switch
+            <IoSToggle
               value={verifyOn}
               onValueChange={(v) => setSilentRule('verify', v ? 1 : 0, setVerifyOn)}
-              trackColor={{ true: ACCENT }}
             />
           </View>
         </View>
@@ -323,9 +323,7 @@ export default function LiveDmBlockScreen() {
           showsVerticalScrollIndicator={false}
           estimatedItemSize={52}
           overrideItemLayout={ruleLayout}
-          windowSize={9}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
+          drawDistance={250}
           overrideProps={{ initialDrawBatchSize: 10 }}
           getItemType={getItemType}
           ListEmptyComponent={
@@ -364,7 +362,7 @@ export default function LiveDmBlockScreen() {
             scaleTo={0.9}
             disabled={!input.trim() || busy}
             onPress={activeTab === 0 ? addKeyword : addUser}
-            style={[styles.addBtn, { backgroundColor: input.trim() && !busy ? ACCENT : colors.fill2 }]}>
+            style={[styles.addBtn, { backgroundColor: input.trim() && !busy ? accent : colors.fill2 }]}>
             <Ionicons name="add" size={18} color={input.trim() && !busy ? '#FFFFFF' : colors.textTertiary} />
             <Text style={[T.footnote, styles.addBtnText, { color: input.trim() && !busy ? '#FFFFFF' : colors.textTertiary, fontWeight: '600' }]}>添加</Text>
           </Press>

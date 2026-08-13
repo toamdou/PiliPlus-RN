@@ -176,9 +176,6 @@ export default function PopularSeriesScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => activeNumber && loadSeries(activeNumber, true)} tintColor={colors.textSecondary} />}
         estimatedItemSize={220}
         overrideItemLayout={overrideItemLayout}
-        windowSize={9}
-        initialNumToRender={8}
-        maxToRenderPerBatch={10}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListHeaderComponent={

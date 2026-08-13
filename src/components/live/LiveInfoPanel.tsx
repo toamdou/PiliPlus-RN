@@ -14,7 +14,9 @@ import { useSettingsStore } from '@/stores/settings';
 import { formatCount } from '@/utils/format';
 import { biliCover } from '@/utils/image-url';
 import { RADII, continuous, shadow } from '@/theme/tokens';
+import { SPACE } from '@/theme/spacing';
 import { FullscreenScOverlay } from './FullscreenScOverlay';
+import { SuperChatCard } from './SuperChatCard';
 
 export interface LiveInfo {
   room_id: number; uid: number; title: string; cover: string;
@@ -70,13 +72,15 @@ export function LiveInfoPanel({
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const fullScreenScScale = useSettingsStore((s) => s.fullScreenScScale);
+  // 04-B3/B4（P1）：画面比例读取设置（contain/cover/fill），兜底 contain。
+  const videoGravity = useSettingsStore((s) => s.videoGravity) ?? 'contain';
 
   return (
     <>
       {/* 播放器 */}
       <View style={[styles.playerWrap, { width: windowWidth }]}>
         {playUrl ? (
-          <PiliPlayerView player={player} style={styles.player} videoGravity="contain" />
+          <PiliPlayerView player={player} style={styles.player} videoGravity={videoGravity} />
         ) : (
           <View style={[styles.player, styles.playerPlaceholder, { backgroundColor: '#1c1c1e' }]}>
             <Text style={[T.footnote, styles.placeholderText]}>{info?.live_status === 1 ? '加载中…' : '主播未开播'}</Text>
@@ -192,18 +196,12 @@ export function LiveInfoPanel({
         </View>
       )}
 
-      {/* SuperChat 消息（superChatType: 0=普通, 1=紧凑, 2=隐藏） */}
+      {/* SuperChat 消息（superChatType: 0=普通, 1=紧凑, 2=隐藏）
+          SuperChat 已抽为 SuperChatCard：圆角/字号/间距走 token，深色模式做背景亮度校验 */}
       {superChatType !== 2 && superChats.length > 0 && (
-        <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+        <View style={styles.superChatWrap}>
           {superChats.slice(0, superChatType === 1 ? 2 : 3).map((sc: any) => (
-            <View key={sc.id} style={{ backgroundColor: sc.background_color || 'rgba(255,182,0,0.15)', borderRadius: 8, padding: superChatType === 1 ? 6 : 8, marginBottom: superChatType === 1 ? 4 : 6 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <ExpoImage source={{ uri: biliCover(sc.user_info?.face || '', 48, 48) }} recyclingKey={sc.user_info?.face || ''} style={{ width: 24, height: 24, borderRadius: 12 }} />
-                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }}>{sc.user_info?.uname}</Text>
-                <Text style={{ color: ACCENT, fontSize: 12, fontWeight: '700', marginLeft: 'auto' }}>¥{sc.price}</Text>
-              </View>
-              {sc.message ? <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{sc.message}</Text> : null}
-            </View>
+            <SuperChatCard key={sc.id} sc={sc} compact={superChatType === 1} />
           ))}
         </View>
       )}
@@ -259,4 +257,6 @@ const styles = StyleSheet.create({
   },
   eventRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   eventText: { flex: 1 },
+  /* SuperChat 列表容器：左右留白走 SPACE.page，底部留白收 4pt（与卡片组间距错落） */
+  superChatWrap: { paddingHorizontal: SPACE.md, paddingBottom: SPACE.xs },
 });

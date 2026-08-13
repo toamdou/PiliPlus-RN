@@ -1,7 +1,5 @@
 // Copyright 2026 PiliPlus. All rights reserved.
 
-import AVFoundation
-import QuartzCore
 import UIKit
 
 private final class PiliFullscreenPassthroughView: UIView {
@@ -11,18 +9,10 @@ private final class PiliFullscreenPassthroughView: UIView {
     }
 }
 
-private enum PiliFullscreenGestureMode: Equatable {
-    case none
-    case brightness
-    case volume
-}
-
 final class PiliFullscreenPresenter {
     static let shared = PiliFullscreenPresenter()
 
     private weak var controller: PiliFullscreenController?
-    private weak var gestureWindow: UIWindow?
-    private var panGesture: UIPanGestureRecognizer?
 
     private init() {}
 
@@ -46,54 +36,22 @@ final class PiliFullscreenPresenter {
                 let controller = PiliFullscreenController(options: options)
                 self.controller = controller
                 top.present(controller, animated: true) {
-                    self.installPanGesture(on: controller)
+                    // 04-B6-5：全屏手势单一事实源——原生不再安装 window 级 pan 手势。
+                    // 亮度/音量/滑动退出全屏/拖字幕全部由 JS 侧 RNGH（use-fullscreen-player）
+                    // 承接，原生 VC 仅保留状态栏/电量/时间显示。
                     continuation.resume(returning: true)
                 }
             }
         }
     }
 
-    func installPanGestureIfNeeded() {
-        guard let controller else {
-            return
-        }
-        installPanGesture(on: controller)
-    }
-
     func dismiss() {
         DispatchQueue.main.async {
-            self.removePanGesture()
             if let controller = self.controller {
                 controller.dismissFromPresenter()
             }
             self.controller = nil
         }
-    }
-
-    private func installPanGesture(on controller: PiliFullscreenController) {
-        removePanGesture()
-        guard controller.gesturesEnabled else {
-            return
-        }
-        guard let window = controller.view.window else {
-            return
-        }
-        let pan = UIPanGestureRecognizer(target: controller, action: #selector(PiliFullscreenController.handlePan(_:)))
-        pan.cancelsTouchesInView = false
-        pan.delaysTouchesBegan = false
-        pan.delaysTouchesEnded = false
-        pan.delegate = controller
-        window.addGestureRecognizer(pan)
-        panGesture = pan
-        gestureWindow = window
-    }
-
-    private func removePanGesture() {
-        if let panGesture {
-            gestureWindow?.removeGestureRecognizer(panGesture)
-        }
-        panGesture = nil
-        gestureWindow = nil
     }
 
     private static func topViewController() -> UIViewController? {
@@ -107,24 +65,18 @@ final class PiliFullscreenPresenter {
     }
 }
 
-final class PiliFullscreenController: UIViewController, UIGestureRecognizerDelegate {
+final class PiliFullscreenController: UIViewController {
     private let fullScreenMode: Int
     private let autoRotate: Bool
+    /// 原生手势已全部禁用（04-B6-5：JS RNGH 为唯一手势源），该选项保留仅为
+    /// 记录 JS 侧是否启用"滑动亮度/音量"（决定 JS 手势的识别分区），原生不再消费。
     let gesturesEnabled: Bool
 
     private let timeLabel = UILabel()
     private let batteryLabel = UILabel()
     private let statusStack = UIStackView()
-    private let hudStack = UIStackView()
-    private let hudValueLabel = UILabel()
-    private let hudIconLabel = UILabel()
-    private var hudTimer: Timer?
     private var clockTimer: Timer?
     private var batteryObservers: [NSObjectProtocol] = []
-
-    private var gestureMode: PiliFullscreenGestureMode = .none
-    private var gestureBase: Double = 0
-    private var lastHUDUpdate: CFTimeInterval = 0
 
     init(options: [String: Any]) {
         fullScreenMode = (options["fullScreenMode"] as? Double).map { Int($0) } ?? 0
@@ -148,7 +100,6 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
     override func viewDidLoad() {
         super.viewDidLoad()
         buildStatusLabels()
-        buildHUD()
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -156,20 +107,23 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
         updateStatusLabels()
         startBatteryMonitoring()
         startClockTimer()
-        applyOrientation()
+        // 04-B1：方向不再由原生 VC 控制——进入/退出全屏的旋转全部交给
+        // JS 侧 expo-screen-orientation（lockAsync）统一接管。
+        // 原实现在 viewWillAppear（view.window == nil）调 applyOrientation，
+        // iOS16+ 的 requestGeometryUpdate 分支永远取不到 windowScene 而跳过，
+        // 只剩 KVC hack，导致全屏旋转从未生效。此处移除原生旋转逻辑。
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        PiliFullscreenPresenter.shared.installPanGestureIfNeeded()
+        // 04-B6-5：全屏手势单一事实源——原生不再安装 pan 手势（JS RNGH 唯一手势源）。
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         stopClockTimer()
         stopBatteryMonitoring()
-        hudTimer?.invalidate()
-        restorePortraitOrientation()
+        // 方向恢复同样由 expo-screen-orientation 负责（退出全屏时 JS 已锁回竖屏）。
     }
 
     override var prefersStatusBarHidden: Bool {
@@ -184,14 +138,11 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
         true
     }
 
+    /// 方向已由 JS 侧 expo-screen-orientation 统一接管（进入全屏按 FULLSCREEN_MODES
+    /// lock、退出恢复竖屏）。这里必须返回全方向，否则系统会把"VC 支持方向"与
+    /// expo 的 requestGeometryUpdate 取交集，导致竖屏视频全屏 / 退出恢复竖屏失效。
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        if fullScreenMode == 1 {
-            return .portrait
-        }
-        if fullScreenMode == 2 || autoRotate {
-            return .allButUpsideDown
-        }
-        return .landscapeLeft
+        .all
     }
 
     func dismissFromPresenter() {
@@ -199,71 +150,6 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
             return
         }
         dismiss(animated: true)
-    }
-
-    // MARK: - Pan gesture
-
-    @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-        guard let window = view.window else {
-            return
-        }
-        let location = gesture.location(in: window)
-        let width = window.bounds.width
-        let height = window.bounds.height
-
-        switch gesture.state {
-        case .began:
-            guard location.y < height - 120 else {
-                gestureMode = .none
-                return
-            }
-            if location.x < width / 3 {
-                gestureMode = .brightness
-                gestureBase = Double(UIScreen.main.brightness)
-            } else if location.x > width * 2 / 3 {
-                gestureMode = .volume
-                gestureBase = Double(PiliPlayerSession.shared.player.volume)
-            } else {
-                gestureMode = .none
-                return
-            }
-            lastHUDUpdate = 0
-            showHUD()
-        case .changed:
-            guard gestureMode != .none else {
-                return
-            }
-            let now = CACurrentMediaTime()
-            guard now - lastHUDUpdate >= 0.1 else {
-                return
-            }
-            lastHUDUpdate = now
-            let delta = -Double(gesture.translation(in: window).y) / 200
-            let value = min(max(gestureBase + delta, 0), 1)
-            switch gestureMode {
-            case .brightness:
-                UIScreen.main.brightness = CGFloat(value)
-                hudIconLabel.text = "B"
-            case .volume:
-                PiliPlayerSession.shared.setVolume(Float(value))
-                hudIconLabel.text = "V"
-            case .none:
-                break
-            }
-            hudValueLabel.text = "\(Int(value * 100))%"
-        case .ended, .cancelled, .failed:
-            gestureMode = .none
-            scheduleHideHUD()
-        default:
-            break
-        }
-    }
-
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        true
     }
 
     // MARK: - Status labels
@@ -287,49 +173,6 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
             statusStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 10),
             statusStack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
         ])
-    }
-
-    private func buildHUD() {
-        hudStack.axis = .vertical
-        hudStack.alignment = .center
-        hudStack.spacing = 8
-        hudStack.isUserInteractionEnabled = false
-        hudStack.backgroundColor = UIColor.black.withAlphaComponent(0.72)
-        hudStack.layer.cornerRadius = 12
-        hudStack.isHidden = true
-        hudStack.translatesAutoresizingMaskIntoConstraints = false
-
-        hudIconLabel.textColor = .white
-        hudIconLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        hudValueLabel.textColor = .white
-        hudValueLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
-        hudStack.addArrangedSubview(hudIconLabel)
-        hudStack.addArrangedSubview(hudValueLabel)
-        view.addSubview(hudStack)
-
-        NSLayoutConstraint.activate([
-            hudStack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            hudStack.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -36),
-            hudStack.widthAnchor.constraint(equalToConstant: 72),
-        ])
-    }
-
-    private func showHUD() {
-        hudTimer?.invalidate()
-        hudStack.isHidden = false
-        hudStack.alpha = 1
-    }
-
-    private func scheduleHideHUD() {
-        hudTimer?.invalidate()
-        hudTimer = Timer(timeInterval: 0.3, repeats: false) { [weak self] _ in
-            UIView.animate(withDuration: 0.18) {
-                self?.hudStack.alpha = 0
-            } completion: { _ in
-                self?.hudStack.isHidden = true
-            }
-        }
-        RunLoop.main.add(hudTimer!, forMode: .common)
     }
 
     private func startBatteryMonitoring() {
@@ -384,26 +227,5 @@ final class PiliFullscreenController: UIViewController, UIGestureRecognizerDeleg
         } else {
             batteryLabel.text = nil
         }
-    }
-
-    // MARK: - Orientation
-
-    private func applyOrientation() {
-        let mask = supportedInterfaceOrientations
-        if #available(iOS 16.0, *), let scene = view.window?.windowScene {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
-            setNeedsUpdateOfSupportedInterfaceOrientations()
-        }
-        let orientation: UIInterfaceOrientation = mask.contains(.portrait) ? .portrait : .landscapeLeft
-        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-        UIViewController.attemptRotationToDeviceOrientation()
-    }
-
-    private func restorePortraitOrientation() {
-        if #available(iOS 16.0, *), let scene = view.window?.windowScene {
-            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
-        }
-        UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
-        UIViewController.attemptRotationToDeviceOrientation()
     }
 }

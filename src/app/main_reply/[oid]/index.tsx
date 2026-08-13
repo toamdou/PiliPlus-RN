@@ -1,4 +1,4 @@
-import { memo, useCallback, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Stack, useLocalSearchParams, useRouter, useScrollToTop } from 'expo-router';
@@ -89,9 +89,11 @@ export default function MainReplyScreen() {
   const colors = useThemeColors();
   const T = useType();
   const insets = useSafeAreaInsets();
-  const { oid, type, title } = useLocalSearchParams<{ oid: string; type?: string; title?: string }>();
+  const { oid, type, title, rootId } = useLocalSearchParams<{ oid: string; type?: string; title?: string; rootId?: string }>();
   const oidNum = Number(oid);
   const typeNum = Number(type || '1') || 1;
+  // M1：通知深链带 comment_root_id 进入，用于数据加载后滚动定位到目标评论
+  const rootIdNum = rootId ? Number(rootId) : NaN;
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
   const listRef = useRef<any>(null);
   useScrollToTop(listRef);
@@ -124,7 +126,9 @@ export default function MainReplyScreen() {
         },
         content: { message: r.content?.message || '' },
         like: r.like ?? 0,
-        action: r.up_action?.like ? 1 : 0,
+        // M2：点赞初始态用评论自身的 action（0=无 1=已赞 2=已踩），
+        // 而非 up_action.like（"UP主觉得很赞"标记，会导致 UP 赞过的评论误显为"我已赞"）
+        action: r.action ?? 0,
         ctime: r.ctime ?? 0,
         rcount: r.rcount ?? 0,
       }));
@@ -147,6 +151,57 @@ export default function MainReplyScreen() {
 
   const loaded = !loading && !error;
 
+  /* M1：带 comment_root_id（rootId 参数）进入时，首屏数据加载完成后滚动定位到目标评论。
+     受限于分页数据可能不含目标评论，定位逻辑如下：
+       1) 目标评论在已加载列表中 → scrollToIndex 居中定位；
+       2) 不在当前页 → 自动加载后续页直到命中或拉完（有上限保护，未命中时静默放弃）。
+     注意：unmount 后不再触发 scrollToIndex。 */
+  const rootIdLocateDoneRef = useRef(false);
+  const rootIdUnmountedRef = useRef(false);
+  useEffect(() => () => { rootIdUnmountedRef.current = true; }, []);
+
+  const locateRootReply = useCallback((target: number, searchItems: MainReplyItem[]): boolean => {
+    if (rootIdUnmountedRef.current) return true;
+    const idx = searchItems.findIndex((r) => r.rpid === target);
+    if (idx < 0) return false;
+    rootIdLocateDoneRef.current = true;
+    setTimeout(() => {
+      if (rootIdUnmountedRef.current) return;
+      try {
+        listRef.current?.scrollToIndex({
+          index: idx,
+          viewPosition: 0.4,
+          viewOffset: 8,
+          animated: true,
+        });
+      } catch {}
+    }, 120);
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (loading || !loaded || rootIdLocateDoneRef.current || !Number.isFinite(rootIdNum)) return;
+    if (locateRootReply(rootIdNum, replies)) return;
+    // 目标不在当前页：继续拉取直到命中或耗尽（上限保护，避免深链循环拉取）
+    let hops = 0;
+    let alive = true;
+    const timer = setInterval(() => {
+      if (!alive || hops >= 8 || !hasMore) {
+        clearInterval(timer);
+        return;
+      }
+      hops += 1;
+      loadMore();
+    }, 450);
+    return () => { alive = false; clearInterval(timer); };
+  }, [loading, loaded, rootIdNum, replies, hasMore, loadMore, locateRootReply]);
+
+  // 已加载列表中可能随后续页加载而包含目标评论，命中后停止
+  useEffect(() => {
+    if (rootIdLocateDoneRef.current || !Number.isFinite(rootIdNum)) return;
+    locateRootReply(rootIdNum, replies);
+  }, [replies, rootIdNum, locateRootReply]);
+
   const changeMode = useCallback((m: number) => {
     if (modeRef.current === m) return;
     modeRef.current = m;
@@ -167,7 +222,9 @@ export default function MainReplyScreen() {
       r.rpid === item.rpid ? { ...r, action: next, like: Math.max(0, r.like + (next ? 1 : -1)) } : r
     )));
     try {
-      const res = await replyApi.like({ oid: item.oid, type: item.type, rpid: item.rpid, action: next ? 1 : 2 });
+      // M3：/x/v2/reply/action 的 action 语义为 1=赞 2=踩 0=取消，
+      // 取消赞应发 0（撤销）而非 2（会把点赞变成踩）
+      const res = await replyApi.like({ oid: item.oid, type: item.type, rpid: item.rpid, action: next ? 1 : 0 });
       if (res?.code !== 0) throw new Error(res?.message || '操作失败');
       feedBack();
     } catch (e) {

@@ -211,9 +211,6 @@ export default function MemberGuardScreen() {
           )
         }
         estimatedItemSize={68}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         overrideItemLayout={rowLayout}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}

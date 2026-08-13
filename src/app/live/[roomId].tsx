@@ -31,6 +31,8 @@ import {
   createNativeRequestCancelToken,
   type NativeRequestCancelToken,
 } from '@/utils/request-cancel';
+// 06-L1：加载失败错误态（共享组件 ErrorState，默认导出）
+import ErrorState from '@/components/ErrorState';
 
 export default function LiveRoomScreen() {
   const { roomId } = useLocalSearchParams<{ roomId: string }>();
@@ -39,6 +41,7 @@ export default function LiveRoomScreen() {
   const [info, setInfo] = useState<LiveInfo | null>(null);
   const [playUrl, setPlayUrl] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [roomArea, setRoomArea] = useState<RoomArea | null>(null);
   const [superChats, setSuperChats] = useState<any[]>([]);
@@ -108,7 +111,6 @@ export default function LiveRoomScreen() {
           headers: { ...PLAYER_HEADERS },
         });
         if (cancelled) return;
-        player.setLoop(true);
         player.setTimeUpdateInterval(0);
         player.setBufferConfig(0);
         player.setLiveMode(true);
@@ -127,10 +129,15 @@ export default function LiveRoomScreen() {
     };
   }, [playUrl, player]);
 
+  // 04-3.8：退出直播间必须复位共享会话参数，否则 liveMode/bufferConfig/
+  // timeUpdateInterval(0)/loop 残留，下载播放页等点播场景会沿用直播小缓冲策略导致卡顿。
   useEffect(() => {
     return () => {
       try {
         player.pause();
+        player.setLiveMode(false);
+        player.setLoop(false); // 直播本就不需要 loop（原实现 setLoop(true) 对直播无意义）
+        player.setTimeUpdateInterval(0.5); // 点播默认进度刷新间隔
       } catch {}
       releaseAudioPlayer();
     };
@@ -234,6 +241,7 @@ export default function LiveRoomScreen() {
     const cancelToken = createNativeRequestCancelToken();
     roomCancelRef.current = cancelToken;
     setLoading(true);
+    setLoadError(null);
     try {
       const s = useSettingsStore.getState();
       const rid = parseInt(roomId);
@@ -330,7 +338,12 @@ export default function LiveRoomScreen() {
         });
       }
     } catch (e) {
-      if (!cancelToken.aborted) console.error('loadRoom error:', e);
+      // 06-L1：加载失败不再只 console.error 渲染空壳页——设置错误态并交给 ErrorState 展示
+      if (cancelToken.aborted) return;
+      console.error('loadRoom error:', e);
+      if (seq === loadSeqRef.current) {
+        setLoadError(e instanceof Error ? e.message : '直播间加载失败');
+      }
     } finally {
       if (seq === loadSeqRef.current) setLoading(false);
     }
@@ -580,6 +593,21 @@ export default function LiveRoomScreen() {
       { text: '人身攻击', onPress: () => submitReport('人身攻击') },
       { text: '取消', style: 'cancel' },
     ]);
+  }
+
+  // 06-L1：加载失败渲染错误态 + 重试按钮（ErrorState 为共享组件，重试走 loadRoom）
+  if (loadError && !loading) {
+    return (
+      <View style={[styles.root, { backgroundColor: colors.bg }]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <ErrorState
+          title="直播间加载失败"
+          message={loadError}
+          onRetry={() => loadRoom()}
+          retryLabel="重试"
+        />
+      </View>
+    );
   }
 
   if (loading) {

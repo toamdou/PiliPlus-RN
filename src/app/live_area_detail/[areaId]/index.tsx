@@ -18,6 +18,8 @@ import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { RADII, continuous } from '@/theme/tokens';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const SIDE = 14;
 const GAP = 12;
@@ -151,9 +153,6 @@ function LiveRoomGrid({ areaId, parentAreaId, onPressRoom }: { areaId: number; p
       onEndReached={loadMore}
       onEndReachedThreshold={0.4}
       estimatedItemSize={220}
-      windowSize={9}
-      initialNumToRender={10}
-      maxToRenderPerBatch={12}
       drawDistance={250}
       overrideProps={{ initialDrawBatchSize: 10 }}
       ListEmptyComponent={
@@ -162,24 +161,18 @@ function LiveRoomGrid({ areaId, parentAreaId, onPressRoom }: { areaId: number; p
             {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} height={coverH} />)}
           </View>
         ) : error ? (
-          <View style={styles.emptyWrap}>
-            <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-              <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-            </View>
-            <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-            <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>网络开小差了，试试重新加载</Text>
-            <Press haptic scaleTo={0.94} onPress={refresh} style={styles.retryBtn}>
-              <Text style={[T.subhead, styles.retryBtnText]}>重新加载</Text>
-            </Press>
-          </View>
+          <ErrorState
+            title="加载失败"
+            message="网络开小差了，试试重新加载"
+            onRetry={refresh}
+            retryLabel="重新加载"
+          />
         ) : (
-          <View style={styles.emptyWrap}>
-            <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-              <Ionicons name="tv-outline" size={38} color={colors.textTertiary} />
-            </View>
-            <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无直播</Text>
-            <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>该分区暂时没有正在直播的房间</Text>
-          </View>
+          <EmptyState
+            icon="tv-outline"
+            title="暂无直播"
+            subtitle="该分区暂时没有正在直播的房间"
+          />
         )
       }
       ListFooterComponent={
@@ -319,11 +312,4 @@ const styles = StyleSheet.create({
   anchorName: { flex: 1 },
   /* 骨架 */
   skeletonGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingTop: 8 },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 120, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10 },
-  retryBtnText: { color: '#FFFFFF', fontWeight: '600' },
 });

@@ -217,15 +217,13 @@ export const HomeFeedList = memo(function HomeFeedList({
           ) +
           (feedLayout === 'compact' ? 14 : 16)
         }
-        windowSize={7}
-        initialNumToRender={8}
-        maxToRenderPerBatch={10}
         numColumns={feedLayout === 'compact' ? 2 : 1}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         getItemType={getItemType}
         overrideItemLayout={overrideItemLayout}
         drawDistance={400}
+        overrideProps={{ initialDrawBatchSize: 8 }}
         contentInsetAdjustmentBehavior="never"
         style={styles.list}
         contentContainerStyle={[

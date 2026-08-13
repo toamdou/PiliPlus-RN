@@ -21,6 +21,8 @@ import { feedBack, feedBackSuccess } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
 import * as Clipboard from 'expo-clipboard';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 interface MyReplyItem {
   rpid: number;
@@ -268,9 +270,6 @@ export default function MyReplyScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         estimatedItemSize={160}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackSuccess(); refresh(); }} tintColor={colors.textSecondary} />}
@@ -282,21 +281,13 @@ export default function MyReplyScreen() {
         }
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <Ionicons name="alert-circle-outline" size={38} color={colors.textTertiary} />
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={[styles.retryBtn, { backgroundColor: colors.fill2 }]}>
-                <Text style={[T.subhead, { color: ACCENT, fontWeight: '600' }]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState title="加载失败" onRetry={refresh} />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="chatbox-ellipses-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无评论</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>发表过的评论会显示在这里</Text>
-            </View>
+            <EmptyState
+              icon="chatbox-ellipses-outline"
+              title="暂无评论"
+              subtitle="发表过的评论会显示在这里"
+            />
           )
         }
         renderItem={renderRow}
@@ -355,12 +346,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 10, borderRadius: RADII.md, paddingHorizontal: 24, paddingVertical: 8 },
   /* 骨架 */
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
 });

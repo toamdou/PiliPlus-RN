@@ -24,6 +24,8 @@ import { videoApi } from '@/api/video';
 import { usePagedList } from '@/hooks/use-paged-list';
 import { feedBackSuccess, openLink } from '@/utils/feedback';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 interface NoteAuthor {
   mid: number;
@@ -183,9 +185,6 @@ export default function NotesScreen() {
         onEndReached={onLoadMore}
         onEndReachedThreshold={0.3}
         estimatedItemSize={160}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListEmptyComponent={
@@ -194,21 +193,17 @@ export default function NotesScreen() {
               <ActivityIndicator size="large" color={colors.textTertiary} />
             </View>
           ) : error ? (
-            <View style={styles.stateWrap}>
-              <Ionicons name="alert-circle-outline" size={40} color={colors.textTertiary} />
-              <Text style={[T.footnote, { color: '#FF6B6B', marginTop: 10 }]}>{error}</Text>
-              <Press haptic scaleTo={0.97} onPress={refresh} style={[styles.retryBtn, { backgroundColor: colors.fill1 }]}>
-                <Text style={[T.footnote, { color: ACCENT, fontWeight: '600' }]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState
+              title="加载失败"
+              message={typeof error === 'string' ? error : undefined}
+              onRetry={refresh}
+            />
           ) : (
-            <View style={styles.stateWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="document-text-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text, marginTop: 14, fontWeight: '600' }]}>暂无笔记</Text>
-              <Text style={[T.footnote, { color: colors.textSecondary, marginTop: 6 }]}>快来记录第一条笔记吧</Text>
-            </View>
+            <EmptyState
+              icon="document-text-outline"
+              title="暂无笔记"
+              subtitle="快来记录第一条笔记吧"
+            />
           )
         }
         ListFooterComponent={
@@ -261,8 +256,6 @@ const styles = StyleSheet.create({
   noteBody: { flex: 1 },
   /* 状态 */
   stateWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 90, paddingHorizontal: 40 },
-  retryBtn: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 6, borderRadius: RADII.sm, ...continuous },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center' },
   /* 底栏 */
   footer: {
     paddingHorizontal: 12,

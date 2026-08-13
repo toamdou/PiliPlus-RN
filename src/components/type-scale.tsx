@@ -24,8 +24,11 @@ type Weight = TextStyle['fontWeight'];
 
 export function useType() {
   const fontSize = useSettingsStore((s) => s.fontSize);
+  // 批次5 P3：界面缩放（uiScale）——与 fontSize 相乘得到全局缩放系数 k。
+  // 用户调字体大小/界面缩放任一设置都会整体重建字阶，逻辑保持不变。
+  const uiScale = useSettingsStore((s) => s.uiScale);
   return useMemo(() => {
-    const k = fontSize / 14;
+    const k = (fontSize / 14) * uiScale;
     const mk = (size: number, fontWeight: Weight, lineHeight?: number, letterSpacing?: number): TextStyle => ({
       fontSize: +(size * k).toFixed(1),
       fontWeight,
@@ -46,7 +49,7 @@ export function useType() {
       caption1: mk(12, '400', 16, 0.1),
       caption2: mk(11, '500', 14, 0.2),
     };
-  }, [fontSize]);
+  }, [fontSize, uiScale]);
 }
 
 export type TypeScale = ReturnType<typeof useType>;

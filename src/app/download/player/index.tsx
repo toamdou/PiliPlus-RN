@@ -5,10 +5,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { PiliPlayer, PiliPlayerProgressBar, PiliPlayerView } from 'pili-player';
 import { Press } from '@/components/motion';
 import { useThemeColors } from '@/components/SwiftUIHost';
+import { useSettingsStore } from '@/stores/settings';
 
 export default function DownloadPlayerScreen() {
   const params = useLocalSearchParams<{ uri: string; title?: string }>();
   const colors = useThemeColors();
+  // 04-B3/B4（P1）：画面比例读取设置（contain/cover/fill），兜底 contain。
+  const videoGravity = useSettingsStore((s) => s.videoGravity) ?? 'contain';
   const [playing, setPlaying] = useState(false);
   const player = PiliPlayer.shared;
 
@@ -67,7 +70,7 @@ export default function DownloadPlayerScreen() {
       <Stack.Title large>{String(params.title || '本地播放')}</Stack.Title>
       <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
       <View style={styles.videoWrap}>
-        <PiliPlayerView player={player} style={styles.video} videoGravity="contain" />
+        <PiliPlayerView player={player} style={styles.video} videoGravity={videoGravity} />
         <View style={styles.overlay}>
           <Press haptic scaleTo={0.9} onPress={togglePlay} style={styles.playBtn}>
             <Ionicons name={playing ? 'pause' : 'play'} size={30} color="#FFFFFF" />

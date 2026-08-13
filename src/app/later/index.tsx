@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
-import { View, Text, StyleSheet, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, RefreshControl, Alert, LayoutAnimation } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Stack, useRouter, Link, useScrollToTop } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useReducedMotion } from 'react-native-reanimated';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { favApi } from '@/api/fav';
+import { videoApi } from '@/api/video';
 import { usePagedList } from '@/hooks/use-paged-list';
 import { formatDuration } from '@/utils/format';
 import { useAuthStore } from '@/stores/auth';
@@ -17,8 +19,24 @@ import { showToast } from '@/utils/toast';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
 import { SkeletonMediaRow } from '@/components/Skeleton';
+import EmptyState from '@/components/EmptyState';
+import { setMediaQueueCache } from '@/hooks/use-video-controller';
 
 const rowLayout = fixedItemLayout(82);
+
+/* 行删除收缩动画（05-C3 列表删除规范：高度收缩 250ms + opacity 后再移除数据）。
+   FlashList 2.0.2 无 removingItem prop（该接口为 1.x 旧版），
+   改用 LayoutAnimation.configureNext 触发 RN 布局动画 + FlashList 的
+   prepareForLayoutAnimationRender() 关闭回收池避免动画错位。 */
+function animateRowDelete(reduced: boolean) {
+  if (reduced) return; // 系统"减弱动态效果"时跳过动画，直接移除
+  LayoutAnimation.configureNext({
+    duration: 250,
+    create: { type: 'easeInEaseOut', property: 'opacity' },
+    update: { type: 'easeInEaseOut' },
+    delete: { type: 'easeInEaseOut', property: 'opacity' },
+  });
+}
 
 interface ToViewItem {
   aid: number;
@@ -78,6 +96,7 @@ export default function LaterScreen() {
   const router = useRouter();
   const colors = useThemeColors();
   const T = useType();
+  const reducedMotion = useReducedMotion();
   const { isLoggedIn } = useAuthStore();
   const [viewed, setViewed] = useState<number | undefined>(undefined);
   const [keyword, setKeyword] = useState('');
@@ -118,35 +137,104 @@ export default function LaterScreen() {
   const removeItem = useCallback(async (item: ToViewItem) => {
     try {
       await favApi.delToView({ resources: String(item.aid) });
+      // 收缩动画：先配置 250ms 高度+透明度布局动画，并关闭回收池，再移除数据
+      animateRowDelete(reducedMotion);
+      listRef.current?.prepareForLayoutAnimationRender?.();
       setItems((prev) => prev.filter((x) => x.aid !== item.aid));
       feedBackSuccess();
     } catch {
       showToast('删除失败');
     }
-  }, [setItems]);
+  }, [setItems, reducedMotion]);
 
-  const clearAll = useCallback(() => {
-    Alert.alert('清空稍后再看', '确定清空全部稍后再看吗？', [
+  /* 清空失效（02-2.3 稍后再看分开操作）：逐项校验 videoApi.view 有效性，失效条目批量移除 */
+  const clearInvalid = useCallback(() => {
+    if (items.length === 0) return;
+    Alert.alert('清空失效', `将逐项校验 ${items.length} 个视频，移除已失效（已删除/无法访问）的条目？`, [
       { text: '取消', style: 'cancel' },
       {
-        text: '清空',
+        text: '清空失效',
         style: 'destructive',
         onPress: async () => {
           try {
-            await favApi.clearToView();
-            setItems([]);
+            const invalid: ToViewItem[] = [];
+            const CHUNK = 3; // 并发校验上限，避免瞬时打爆接口
+            for (let i = 0; i < items.length; i += CHUNK) {
+              const chunk = items.slice(i, i + CHUNK);
+              const results = await Promise.all(
+                chunk.map((it) =>
+                  videoApi.view({ bvid: it.bvid })
+                    .then((r) => r?.code === 0)
+                    .catch(() => false),
+                ),
+              );
+              results.forEach((ok, j) => {
+                if (!ok) invalid.push(chunk[j]);
+              });
+            }
+            if (invalid.length === 0) {
+              showToast('没有失效条目');
+              return;
+            }
+            await favApi.delToView({ resources: invalid.map((x) => String(x.aid)).join(',') });
+            animateRowDelete(reducedMotion);
+            listRef.current?.prepareForLayoutAnimationRender?.();
+            setItems((prev) => prev.filter((x) => !invalid.some((v) => v.aid === x.aid)));
             feedBackSuccess();
+            showToast(`已移除 ${invalid.length} 个失效条目`);
           } catch {
-            showToast('清空失败');
+            showToast('清空失效失败');
           }
         },
       },
     ]);
-  }, [setItems]);
+  }, [items, setItems, reducedMotion]);
 
+  /* 清空看完（02-2.3 稍后再看分开操作）：拉取已看完列表，批量移除 */
+  const clearViewed = useCallback(() => {
+    if (items.length === 0) return;
+    Alert.alert('清空看完', '将移除稍后再看中已看完的视频？', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清空看完',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const res = await favApi.toViewList({ viewed: 1, ps: 50 });
+            const watched = ((res?.data?.list || []) as any[]).map((i) => i.aid).filter((a: any) => typeof a === 'number');
+            if (watched.length === 0) {
+              showToast('没有已看完的条目');
+              return;
+            }
+            await favApi.delToView({ resources: watched.join(',') });
+            animateRowDelete(reducedMotion);
+            listRef.current?.prepareForLayoutAnimationRender?.();
+            setItems((prev) => prev.filter((x) => !watched.includes(x.aid)));
+            feedBackSuccess();
+            showToast(`已移除 ${watched.length} 个已看完条目`);
+          } catch {
+            showToast('清空看完失败');
+          }
+        },
+      },
+    ]);
+  }, [setItems, reducedMotion]);
+
+  /* 播放全部：写入连播队列缓存并携带 queue=1 push，视频页接管后自动连播（02-2.2 medialist） */
   const playAll = useCallback(() => {
     if (items.length === 0) return;
-    router.push({ pathname: '/video/[id]', params: { id: items[0].bvid } } as any);
+    setMediaQueueCache(
+      items.map((it) => ({
+        aid: it.aid,
+        bvid: it.bvid,
+        cid: 0,
+        title: it.title,
+        pic: it.pic,
+        duration: it.duration,
+      })),
+      '稍后再看',
+    );
+    router.push({ pathname: '/video/[id]', params: { id: items[0].bvid, queue: '1' } } as any);
   }, [items, router]);
 
   const renderRow = useCallback(
@@ -159,21 +247,17 @@ export default function LaterScreen() {
   const ItemSeparator = useCallback(() => <View style={{ height: 12 }} />, []);
 
 
+  /* 未登录空态（共享 EmptyState + 去登录 children） */
   if (!isLoggedIn) {
     return (
       <View style={[styles.root, { backgroundColor: colors.bg }]}>
         <Stack.Title large>稍后再看</Stack.Title>
         <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
-        <View style={styles.emptyWrap}>
-          <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="person-circle-outline" size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>请先登录</Text>
-          <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>登录后查看稍后再看列表</Text>
+        <EmptyState icon="person-circle-outline" title="请先登录" subtitle="登录后查看稍后再看列表">
           <Press haptic scaleTo={0.94} onPress={() => router.push('/login' as any)} style={styles.loginBtn}>
             <Text style={[T.subhead, styles.loginBtnText]}>去登录</Text>
           </Press>
-        </View>
+        </EmptyState>
       </View>
     );
   }
@@ -205,17 +289,21 @@ export default function LaterScreen() {
           ))}
         </View>
         <View style={styles.actionRow}>
-          <Press haptic scaleTo={0.94} onPress={() => router.push('/later_search' as any)} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="search" size={15} color={colors.text} />
-            <Text style={[T.footnote, { color: colors.text }]}>搜索</Text>
-          </Press>
           <Press haptic scaleTo={0.94} onPress={playAll} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
             <Ionicons name="play" size={15} color={colors.text} />
             <Text style={[T.footnote, { color: colors.text }]}>播放全部</Text>
           </Press>
-          <Press haptic scaleTo={0.94} onPress={clearAll} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="trash-outline" size={15} color={colors.text} />
-            <Text style={[T.footnote, { color: colors.text }]}>清空</Text>
+          <Press haptic scaleTo={0.94} onPress={() => router.push('/later_search' as any)} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
+            <Ionicons name="search" size={15} color={colors.text} />
+            <Text style={[T.footnote, { color: colors.text }]}>搜索</Text>
+          </Press>
+          <Press haptic scaleTo={0.94} onPress={clearInvalid} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
+            <Ionicons name="alert-circle-outline" size={15} color={colors.text} />
+            <Text style={[T.footnote, { color: colors.text }]}>清空失效</Text>
+          </Press>
+          <Press haptic scaleTo={0.94} onPress={clearViewed} style={[styles.actionBtn, { backgroundColor: colors.fill2 }]}>
+            <Ionicons name="checkmark-circle-outline" size={15} color={colors.text} />
+            <Text style={[T.footnote, { color: colors.text }]}>清空看完</Text>
           </Press>
         </View>
       </View>
@@ -228,20 +316,12 @@ export default function LaterScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackMedium(); refresh(); }} tintColor={colors.textSecondary} />}
         estimatedItemSize={82}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListEmptyComponent={
           loading ? null : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="checkbox-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>稍后再看列表为空</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>把想看的视频加入稍后再看吧</Text>
-            </View>
+            /* 空态：共享 EmptyState（收敛 33 处 emptyIconBox 复制粘贴） */
+            <EmptyState icon="checkbox-outline" title="稍后再看列表为空" subtitle="把想看的视频加入稍后再看吧" />
           )
         }
         renderItem={renderRow}
@@ -274,13 +354,9 @@ const styles = StyleSheet.create({
   toolbar: { paddingHorizontal: 14, paddingTop: 12, gap: 10 },
   chipRow: { flexDirection: 'row', gap: 8 },
   chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 16 },
-  actionRow: { flexDirection: 'row', gap: 10 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14 },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
+  /* 登录按钮 */
   loginBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: 20, paddingHorizontal: 30, paddingVertical: 10 },
   loginBtnText: { color: '#FFFFFF', fontWeight: '600' },
   /* 骨架 */

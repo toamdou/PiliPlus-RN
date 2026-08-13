@@ -131,9 +131,6 @@ export default function CheeseTab({ mid, header, listRef }: MemberTabProps) {
       onEndReached={list.loadMore}
       onEndReachedThreshold={0.4}
       estimatedItemSize={140}
-      windowSize={9}
-      initialNumToRender={10}
-      maxToRenderPerBatch={12}
       drawDistance={250}
       overrideProps={{ initialDrawBatchSize: 10 }}
       onRefresh={list.refresh}

@@ -13,13 +13,16 @@ import { Toast } from '@/components/Toast';
 import { releaseAudioPlayer } from '@/utils/audio-player';
 import { usePlayerStore } from '@/stores/player';
 
-/* 图片内存缓存上限：expo-image 默认无上限（SDWebImage maxMemoryCost=0），
-   信息流滚动加载的封面会永久驻留内存导致 RAM 持续增长；
-   设置上限后按 LRU 自动淘汰，配合封面 maxWidth 解码降采样控制总占用。
-   96MB / 96 张 ≈ 滚动 3-4 屏的封面量 */
+/* 图片缓存上限（01-M2/M4 + 01-T2）：
+   - 内存段从 96MB/96 张降到 32MB/40 张。封面 640×360 单张约 0.9MB，
+     96 张≈90MB 常驻；首页已有 prefetch 预热，32~40 张足够滚动 1-2 屏封面量，
+     峰值内存可省约 50MB（按 LRU 自动淘汰）。
+   - 磁盘段合并进本次调用（原 :64 单独再调一次 configureCache，删掉重复调用）；
+     settings/network.tsx 设置页运行时仍会按 maxCacheSize 更新磁盘上限。 */
 Image.configureCache({
-  maxMemoryCost: 96 * 1024 * 1024,
-  maxMemoryCount: 96,
+  maxMemoryCost: 32 * 1024 * 1024,
+  maxMemoryCount: 40,
+  maxDiskSize: Math.max(0, useSettingsStore.getState().maxCacheSize || 512) * 1024 * 1024,
 });
 
 SplashScreen.preventAutoHideAsync();
@@ -57,13 +60,6 @@ export default function RootLayout() {
         if (!cancelled && (initialPathRef.current === '/' || initialPathRef.current === '')) {
           if (defaultHomePage === 1) router.replace('/dynamics' as any);
           else if (defaultHomePage === 2) router.replace('/mine' as any);
-        }
-        // 磁盘缓存上限按设置（maxCacheSize，MB）应用，内存上限保持默认
-        const maxCacheSize = useSettingsStore.getState().maxCacheSize;
-        if (maxCacheSize > 0) {
-          Image.configureCache({
-            maxDiskSize: maxCacheSize * 1024 * 1024,
-          });
         }
       } catch (e) {
         console.error('RootLayout init error:', e);

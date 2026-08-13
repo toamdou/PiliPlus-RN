@@ -130,6 +130,10 @@ export function VideoPlayerStage({
   onCloseDmInput: () => void;
 }) {
   const enableShrinkVideoSize = useSettingsStore((s) => s.enableShrinkVideoSize);
+  // 04-B3/B4（P1）：画面比例受控 prop（F3 并行在 settings.ts 新增 videoGravity，防御式读取）
+  const videoGravity = (useSettingsStore((s) => (s as any).videoGravity) as 'contain' | 'cover' | 'fill') ?? 'contain';
+  // #31b（01-A4）：展开态 blur 靠 opacity=0 常驻挂载 → 条件卸载（仅暂停收起需要蒙层，播放中恒为 opacity 0）
+  const blurMounted = !isPlaying;
   const enhance = useVideoEnhance();
   const nativePlayerId = (player as any).getSharedPlayerId?.() ?? null;
   const pinchScaleSV = useSharedValue(1);
@@ -170,7 +174,7 @@ export function VideoPlayerStage({
                       <EnhancedVideoView
                         playerId={nativePlayerId}
                         options={enhance.options ?? undefined}
-                        contentFit="contain"
+                        contentFit={videoGravity}
                         onError={enhance.onError}
                         onStateChange={enhance.onStateChange}
                         style={styles.player}
@@ -181,7 +185,7 @@ export function VideoPlayerStage({
                       <PiliPlayerView
                         player={player}
                         style={styles.player}
-                        videoGravity="contain"
+                        videoGravity={videoGravity}
                       />
                     </Animated.View>
                   )}
@@ -212,9 +216,12 @@ export function VideoPlayerStage({
                 </Press>
               </View>
             )}
-            <Animated.View style={[styles.collapseBlur, collapseBlurStyle]} pointerEvents="none">
-              <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
-            </Animated.View>
+            {/* #31b：展开态（播放中）不挂载 BlurView，仅暂停收起需要模糊蒙层 */}
+            {blurMounted && (
+              <Animated.View style={[styles.collapseBlur, collapseBlurStyle]} pointerEvents="none">
+                <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+              </Animated.View>
+            )}
             <Animated.View style={[styles.seekHud, seekHudAnimStyle]} pointerEvents="none">
               <Ionicons name={seekHudDelta >= 0 ? 'play-forward' : 'play-back'} size={16} color="#FFFFFF" />
               <Text style={styles.seekHudTime}>{formatPlayerTime(seekHudTarget)}</Text>
@@ -280,7 +287,18 @@ export function VideoPlayerStage({
 }
 
 const styles = StyleSheet.create({
-  playerWrap: { width: '100%', backgroundColor: '#000', overflow: 'hidden' },
+  /* #15：播放器脱离文档流 absolute 置顶覆盖（高度由 playerCollapseStyle 动画驱动），
+     内容列表由 paddingTop 让位，滚动不再逐帧改播放器高度 */
+  playerWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    width: '100%',
+    backgroundColor: '#000',
+    overflow: 'hidden',
+    zIndex: 10,
+  },
   playerStage: { flex: 1, overflow: 'hidden' },
   player: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   coverOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.25)' },

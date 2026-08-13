@@ -16,6 +16,7 @@ import { RADII, continuous } from '@/theme/tokens';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
 import { SkeletonRow } from '@/components/Skeleton';
+import EmptyState from '@/components/EmptyState';
 
 const rowLayout = fixedItemLayout(72);
 
@@ -140,9 +141,7 @@ export default function BlacklistScreen() {
         onEndReachedThreshold={0.4}
         estimatedItemSize={72}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={
           loadingMore ? (
@@ -151,17 +150,11 @@ export default function BlacklistScreen() {
         }
         ListEmptyComponent={
           loading ? null : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name={isLoggedIn ? 'hand-right-outline' : 'lock-closed-outline'} size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>
-                {isLoggedIn ? '黑名单为空' : '请先登录'}
-              </Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>
-                {isLoggedIn ? '被你拉黑的用户会显示在这里' : '登录后可查看和管理黑名单'}
-              </Text>
-            </View>
+            <EmptyState
+              icon={isLoggedIn ? 'hand-right-outline' : 'lock-closed-outline'}
+              title={isLoggedIn ? '黑名单为空' : '请先登录'}
+              subtitle={isLoggedIn ? '被你拉黑的用户会显示在这里' : '登录后可查看和管理黑名单'}
+            />
           )
         }
         renderItem={renderRow}
@@ -217,11 +210,6 @@ const styles = StyleSheet.create({
   sign: {},
   removeBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADII.md, ...continuous },
   removeText: { fontWeight: '500' },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
   /* 骨架 */
   skeletonCard: { position: 'absolute', top: 12, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
 });

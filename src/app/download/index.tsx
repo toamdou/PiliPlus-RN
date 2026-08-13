@@ -4,7 +4,10 @@ import { FlashList } from '@shopify/flash-list';
 import { Stack, useRouter, useFocusEffect } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { Image as SwiftImage } from '@expo/ui/swift-ui';
+import { Host, useThemeColors } from '@/components/SwiftUIHost';
+import { BILI } from '@/theme/bili-colors';
+import { RADII, shadow } from '@/theme/tokens';
 import { useType } from '@/components/type-scale';
 import { Press } from '@/components/motion';
 import {
@@ -155,30 +158,33 @@ export default function DownloadScreen() {
     router.push({ pathname: '/download/player', params: { uri: item.path, title: item.title } } as any);
   }, [router]);
 
+  const openDetail = useCallback((item: DownloadItem) => {
+    // 单任务分P 详情：多 P 视频展示分 P 列表与逐 P 操作
+    router.push({ pathname: '/download/[id]', params: { id: item.id } } as any);
+  }, [router]);
+
   const renderRow = useCallback(
     ({ item }: { item: DownloadItem }) => {
       const isSelected = selected.has(item.id);
+      const done = item.status === 'done' && !!item.path;
       return (
         <View>
           <Press
             haptic
             scaleTo={0.98}
-            onPress={() => (selectMode ? toggleSelect(item.id) : play(item))}
+            onPress={() => (selectMode ? toggleSelect(item.id) : openDetail(item))}
             style={[
               styles.row,
-              { backgroundColor: isSelected ? 'rgba(251,114,153,0.10)' : colors.card },
+              { backgroundColor: isSelected ? BILI.pinkDim : colors.card },
+              shadow('sm', colors.isDark),
             ]}>
             {selectMode && (
-              <View
-                style={[
-                  styles.checkCircle,
-                  {
-                    borderColor: isSelected ? ACCENT : colors.textTertiary,
-                    backgroundColor: isSelected ? ACCENT : 'transparent',
-                  },
-                ]}>
-                {isSelected ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
-              </View>
+              /* 原生选中圈（SF Symbol checkmark.circle.fill，替代手绘 checkCircle，05-B18） */
+              <SwiftImage
+                systemName={isSelected ? 'checkmark.circle.fill' : 'circle'}
+                size={22}
+                color={isSelected ? colors.accent : colors.textTertiary}
+              />
             )}
             {item.pic ? (
               <ExpoImage source={{ uri: biliCover(item.pic, 160, 100) }} recyclingKey={item.pic} cachePolicy="memory-disk" style={[styles.cover, { backgroundColor: colors.fill2 }]} contentFit="cover" />
@@ -198,22 +204,35 @@ export default function DownloadScreen() {
                 <Text style={[T.caption1, { color: colors.textTertiary }]}>
                   {item.status === 'done' ? '已下载' : item.status === 'error' ? '下载失败' : item.status === 'paused' ? '已暂停' : '下载中'}
                 </Text>
+                {typeof item.partCount === 'number' && item.partCount > 1 ? (
+                  <Text style={[T.caption2, { color: colors.textTertiary }]}>
+                    {`P${(item.partIndex ?? 0) + 1} / ${item.partCount}`}
+                  </Text>
+                ) : null}
               </View>
             </View>
             {!selectMode && (
-              <Press haptic scaleTo={0.88} onPress={() => del(item)} style={styles.delBtn}>
-                <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
-              </Press>
+              <View style={styles.rowActions}>
+                {done && (
+                  <Press haptic scaleTo={0.88} onPress={() => play(item)} style={styles.playBtn}>
+                    <Ionicons name="play" size={16} color={colors.text} />
+                  </Press>
+                )}
+                <Press haptic scaleTo={0.88} onPress={() => del(item)} style={styles.delBtn}>
+                  <Ionicons name="trash-outline" size={16} color={colors.textTertiary} />
+                </Press>
+              </View>
             )}
           </Press>
         </View>
       );
     },
-    [colors, T, del, play, selectMode, selected, toggleSelect],
+    [colors, T, del, play, selectMode, selected, toggleSelect, openDetail],
   );
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.bg }]}>
+    <Host style={{ flex: 1 }} useViewportSizeMeasurement>
+      <View style={[styles.root, { backgroundColor: colors.bg }]}>
       <Stack.Title large>离线缓存</Stack.Title>
       <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
       <View style={styles.headerRow}>
@@ -234,6 +253,10 @@ export default function DownloadScreen() {
             </>
           ) : (
             <>
+              <Press haptic scaleTo={0.92} onPress={() => router.push('/download/search' as any)} style={[styles.clearBtn, { backgroundColor: colors.fill2 }]}>
+                <Ionicons name="search" size={15} color={colors.text} />
+                <Text style={[T.footnote, { color: colors.text }]}>搜索</Text>
+              </Press>
               <Press haptic scaleTo={0.92} onPress={enterSelect} style={[styles.clearBtn, { backgroundColor: colors.fill2 }]}>
                 <Text style={[T.footnote, { color: colors.text }]}>选择</Text>
               </Press>
@@ -266,9 +289,8 @@ export default function DownloadScreen() {
         contentContainerStyle={styles.listContent}
         estimatedItemSize={102}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.textSecondary} />}
         ListEmptyComponent={
           <View style={styles.empty}>
@@ -279,7 +301,8 @@ export default function DownloadScreen() {
         }
         renderItem={renderRow}
       />
-    </View>
+      </View>
+    </Host>
   );
 }
 
@@ -288,14 +311,16 @@ const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 10 },
   headerActions: { flexDirection: 'row', gap: 8 },
   actionRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14 },
-  clearBtn: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 12 },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADII.md },
+  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 7, borderRadius: RADII.sm },
   listContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 40, gap: 10 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: 14 },
-  checkCircle: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
-  cover: { width: 132, height: 82, borderRadius: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 10, borderRadius: RADII.md },
+  /* 媒体缩略图统一 RADII.thumb（登记 DynamicMedia 事实标准，05-B18） */
+  cover: { width: 132, height: 82, borderRadius: RADII.thumb },
   info: { flex: 1, gap: 6 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  playBtn: { padding: 8 },
   delBtn: { padding: 8 },
   empty: { alignItems: 'center', paddingTop: 120, gap: 10 },
 });

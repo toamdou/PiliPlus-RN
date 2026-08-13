@@ -129,6 +129,11 @@ public final class PiliDanmakuModule: Module {
             PiliDanmakuLoader.shared.cancel(requestId: requestId)
         }
 
+        // 01-M3（P1）：页面卸载后释放 token 引用的 prepared 结果，避免长期持 token 驻留内存。
+        AsyncFunction("releaseDanmakuRefAsync") { (token: String) in
+            PiliDanmakuLoader.shared.releasePrepared(token: token)
+        }
+
         AsyncFunction("loadSubtitleJsonAsync") { (url: String) async throws -> [SubtitleItemRecord] in
             try await PiliSubtitleLoader.shared.load(url: url)
         }
@@ -140,6 +145,11 @@ public final class PiliDanmakuModule: Module {
 
             Prop("items") { (view: PiliDanmakuOverlayView, items: [DanmakuItemRecord]?) in
                 view.setItems(items)
+            }
+
+            // 01-M3（P1）：token 引用模式，条目由原生 loader 缓存持有，JS 只传 token。
+            Prop("itemsRef") { (view: PiliDanmakuOverlayView, token: String?) in
+                view.setItemsRef(token)
             }
 
             Prop("currentTime") { (view: PiliDanmakuOverlayView, currentTime: Double?) in
@@ -168,6 +178,27 @@ public final class PiliDanmakuModule: Module {
 
             Prop("lineHeight") { (view: PiliDanmakuOverlayView, lineHeight: Double?) in
                 view.setLineHeight(lineHeight)
+            }
+
+            // 批次5 P1：弹幕设置补齐——显示区域/描边/按类型屏蔽/彩色屏蔽直通原生。
+            Prop("area") { (view: PiliDanmakuOverlayView, area: Double?) in
+                view.setArea(area)
+            }
+
+            Prop("strokeWidth") { (view: PiliDanmakuOverlayView, strokeWidth: Double?) in
+                view.setStrokeWidth(strokeWidth)
+            }
+
+            Prop("strokeColor") { (view: PiliDanmakuOverlayView, strokeColor: String?) in
+                view.setStrokeColor(strokeColor)
+            }
+
+            Prop("blockModes") { (view: PiliDanmakuOverlayView, blockModes: [String]?) in
+                view.setBlockModes(blockModes)
+            }
+
+            Prop("blockColorful") { (view: PiliDanmakuOverlayView, blockColorful: Bool?) in
+                view.setBlockColorful(blockColorful)
             }
 
             Prop("interactive") { (view: PiliDanmakuOverlayView, interactive: Bool?) in

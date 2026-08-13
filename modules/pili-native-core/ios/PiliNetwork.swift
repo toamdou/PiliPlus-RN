@@ -36,8 +36,11 @@ public enum PiliNetwork {
     private static let sensitiveQueryKeys: Set<String> = [
         "access_key", "csrf", "csrf_token", "bili_jct", "auth_code", "SESSDATA"
     ]
+    // 01-M4（P2）：API URLCache 内存段从 16MB 降到 6MB。API JSON 响应多为
+    // 几十 KB 级，16MB 内存驻留收益低；磁盘段保留（piliplus-api-cache）。
+    private static let apiCacheMemoryCapacity = 6 * 1024 * 1024
     private static let apiCache = URLCache(
-        memoryCapacity: 16 * 1024 * 1024,
+        memoryCapacity: apiCacheMemoryCapacity,
         diskCapacity: 64 * 1024 * 1024,
         diskPath: "piliplus-api-cache"
     )
@@ -46,7 +49,8 @@ public enum PiliNetwork {
         let previous = sharedOptions
         sharedOptions = options
         let maxCacheSizeMB = max(8, (options["maxCacheSize"] as? Double) ?? 64)
-        apiCache.memoryCapacity = 16 * 1024 * 1024
+        // 01-M4（P2）：与 apiCache 声明保持一致，configure 不再把内存段抬回 16MB。
+        apiCache.memoryCapacity = apiCacheMemoryCapacity
         apiCache.diskCapacity = Int(maxCacheSizeMB * 1024 * 1024)
         if let data = try? JSONSerialization.data(withJSONObject: options),
            let json = String(data: data, encoding: .utf8) {

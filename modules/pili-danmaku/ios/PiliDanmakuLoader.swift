@@ -14,7 +14,14 @@ final class PiliDanmakuLoader {
     private let segmentSeconds = 360.0
     private let maxSegments = 30
     private let concurrentSegments = 4
-    private let cacheLimit = 8
+    // 01-M3/S5（P1）：rawCache 从 8 cid 降到 3，每条 cid 约 6000 条原始弹幕条目，
+    // 原 8 cid 常驻约 5~10MB，降到 3 cid 后省约 2/3；弹幕是连续播放的场景，3 个足够。
+    private let cacheLimit = 3
+
+    // 01-M3（P1）：prepared 结果（6000 条上屏条目）以 token 引用驻留在原生，
+    // JS 只持有短字符串 token，避免整包序列化过桥 + JS 侧双份驻留。
+    // LRU 上限与 preparedCache 一致（cacheLimit*2），旧 token 自动释放。
+    private var preparedStore: [String: [String: Any]] = [:]
 
     private init() {}
 
@@ -29,7 +36,7 @@ final class PiliDanmakuLoader {
 
         let signature = "\(cid)|\(Self.canonicalJSON(options))"
         if let cached = preparedResult(for: signature) {
-            return cached
+            return slimResult(signature: signature, prepared: cached)
         }
 
         let rawItems: [String: Any]
@@ -113,10 +120,40 @@ final class PiliDanmakuLoader {
         let items = rawItems["items"] as? [[String: Any]] ?? []
         let prepared = PiliDanmakuPreparer.prepare(items: items, options: options)
         lock.lock()
+        // token 引用即签名：同一 cid+options 的 prepared 结果可被多个页面共享，
+        // JS 端 setItemsRefAsync(token) 只传短字符串，条目本身不序列化过桥。
         preparedCache[signature] = prepared
+        preparedStore[signature] = prepared
         trimPreparedCacheIfNeeded()
+        trimPreparedStoreIfNeeded()
         lock.unlock()
-        return prepared
+        // 01-M3（P1）：返回只含 token 与密度标记（高能进度条用）的瘦结果，
+        // 6000 条上屏条目不再整包序列化回 JS，避免过桥往返 + JS 侧双份驻留。
+        return slimResult(signature: signature, prepared: prepared)
+    }
+
+    /// 组装返回给 JS 的瘦结果：token + density，不含上屏条目。
+    private func slimResult(signature: String, prepared: [String: Any]) -> [String: Any] {
+        return [
+            "token": signature,
+            "density": prepared["density"] ?? [],
+        ]
+    }
+
+    /// 01-M3（P1）：按 token 取 prepared 结果里的上屏条目（JS 端设置 itemsRef 时使用）。
+    /// 找不到（已被 LRU 淘汰）时返回 nil，JS 侧会重新 loadAndPrepare 拿到新 token。
+    func preparedItems(forToken token: String) -> [[String: Any]]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return preparedStore[token]?["items"] as? [[String: Any]]
+    }
+
+    /// 01-M3（P1）：页面卸载后释放 token 引用的 prepared 结果，让 LRU 之外的资源尽快回收。
+    func releasePrepared(token: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        preparedCache.removeValue(forKey: token)
+        preparedStore.removeValue(forKey: token)
     }
 
     func cancel(requestId: String) {
@@ -244,6 +281,17 @@ final class PiliDanmakuLoader {
         while preparedCache.count > cacheLimit * 2 {
             if let key = preparedCache.keys.first {
                 preparedCache.removeValue(forKey: key)
+            } else {
+                break
+            }
+        }
+    }
+
+    /// 01-M3（P1）：token 注册表与 preparedCache 同界，避免 JS 端长期持 token 导致内存只增不减。
+    private func trimPreparedStoreIfNeeded() {
+        while preparedStore.count > cacheLimit * 2 {
+            if let key = preparedStore.keys.first {
+                preparedStore.removeValue(forKey: key)
             } else {
                 break
             }

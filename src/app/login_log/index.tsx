@@ -77,9 +77,8 @@ export default function LoginLogScreen() {
         keyExtractor={(it) => it.id}
         contentContainerStyle={styles.listContent}
         estimatedItemSize={76}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.textSecondary} />}
         ListEmptyComponent={loading ? null : <Text style={[T.headline, styles.empty, { color: colors.text }]}>暂无登录日志</Text>}
         renderItem={renderRow}

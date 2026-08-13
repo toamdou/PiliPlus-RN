@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Switch, ScrollView, ActivityIndicator, Share } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Share } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Image as ExpoImage } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
-import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
+import { useThemeColors, useAccent } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { msgApi } from '@/api/msg';
 import { useAuthStore } from '@/stores/auth';
 import { Press, Reveal } from '@/components/motion';
@@ -18,6 +19,7 @@ export default function WhisperLinkSettingScreen() {
   const router = useRouter();
   const { uid } = useLocalSearchParams<{ uid?: string }>();
   const colors = useThemeColors();
+  const accent = useAccent();
   const T = useType();
   const { userInfo } = useAuthStore();
   const talkerId = parseInt(uid || '0', 10) || 0;
@@ -154,7 +156,7 @@ export default function WhisperLinkSettingScreen() {
                 <Ionicons name="copy-outline" size={15} color={colors.text} />
                 <Text style={[T.footnote, { color: colors.text, fontWeight: '600' }]}>复制</Text>
               </Press>
-              <Press haptic scaleTo={0.95} onPress={shareLink} style={[styles.linkBtn, { backgroundColor: ACCENT }]}>
+              <Press haptic scaleTo={0.95} onPress={shareLink} style={[styles.linkBtn, { backgroundColor: accent }]}>
                 <Ionicons name="share-outline" size={15} color="#FFFFFF" />
                 <Text style={[T.footnote, { color: '#FFFFFF', fontWeight: '600' }]}>分享</Text>
               </Press>
@@ -222,13 +224,7 @@ function ToggleRow({
         <Ionicons name={icon} size={17} color={colors.text} />
       </View>
       <Text style={[T.subhead, styles.actionLabel, { color: colors.text }]}>{label}</Text>
-      <Switch
-        value={value}
-        disabled={disabled}
-        onValueChange={onValueChange}
-        trackColor={{ false: colors.fill3, true: ACCENT }}
-        thumbColor="#FFFFFF"
-      />
+      <IoSToggle value={value} disabled={disabled} onValueChange={onValueChange} />
     </Press>
   );
 }

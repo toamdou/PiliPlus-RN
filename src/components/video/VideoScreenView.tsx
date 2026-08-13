@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { useCallback } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, KeyboardAvoidingView } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView, ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
@@ -19,6 +20,7 @@ import { releaseAudioPlayer } from '@/utils/audio-player';
 import { PlayerSettingsSheet } from '@/components/PlayerSettingsSheet';
 import { ImageViewer } from '@/components/ImageViewer';
 import { ReplyDetailSheet } from '@/components/ReplyDetailSheet';
+import ErrorState from '@/components/ErrorState';
 import { PlayerTimeProvider, TimeAwareCollapsedPlayerBar } from './PlayerTimeProvider';
 import { VideoPlayerStage } from './VideoPlayerStage';
 import { VideoIntroSection } from './VideoIntroSection';
@@ -41,10 +43,11 @@ export function VideoScreenView({ controller }: { controller: VideoController })
   audioMode,
   activeTab,
   currentCid,
-  seasonEpisodes,
+  episodeSections,
   playableCount,
   playerBaseHeight,
   playerCollapseStyle,
+  playerSlotStyle,
   collapseBlurStyle,
   playerCollapsed,
   setPlayerCollapsed,
@@ -96,6 +99,10 @@ export function VideoScreenView({ controller }: { controller: VideoController })
   followed,
   onlineCount,
   aiSummary,
+  aiOutline,
+  episodePanelVisible,
+  openEpisodePanel,
+  closeEpisodePanel,
   handleLike,
   handleCoin,
   handleFav,
@@ -111,7 +118,6 @@ export function VideoScreenView({ controller }: { controller: VideoController })
   enterFullscreen,
   showMoreMenu,
   showViewPointsMenu,
-  switchPage,
   switchEpisode,
   switchTab,
   handleTabScroll,
@@ -155,20 +161,62 @@ export function VideoScreenView({ controller }: { controller: VideoController })
   const colors = useThemeColors(darkVideoPage || undefined);
   const T = useType();
 
+  // 契约（并行代理 C）：use-video-controller 将新增 loadError 状态与 retryLoad() 方法。
+  // 此处防御性读取：字段尚未就绪时退化为「!info && !loading」兜底 + 现有 loadVideo 重试。
+  const loadError = (controller as any).loadError;
+  const retryLoad = (controller as any).retryLoad;
+
+  const handleLoadRetry = useCallback(() => {
+    if (typeof retryLoad === 'function') retryLoad();
+    else loadVideo();
+  }, [retryLoad, loadVideo]);
+
+  // 加载期间返回按钮（headerShown:false，VideoOverlay 未渲染时也没有返回入口）
+  const renderLoadingBack = () => (
+    <Press
+      haptic
+      scaleTo={0.9}
+      onPress={() => router.back()}
+      style={[styles.loadingBackBtn, { top: insets.top + 8, backgroundColor: colors.fill2 }]}
+      accessibilityRole="button"
+      accessibilityLabel="返回">
+      <Ionicons name="chevron-back" size={22} color={colors.text} />
+    </Press>
+  );
+
   if (loading) {
     return (
       <View style={[styles.loadingWrap, { backgroundColor: colors.bg }]}>
+        {renderLoadingBack()}
         <ActivityIndicator size="large" color={colors.textTertiary} />
+      </View>
+    );
+  }
+
+  // V4-UI：loadVideo 3 次重试耗尽后（loading=false、info=null）渲染错误态 + 重试
+  if (!info) {
+    return (
+      <View style={[styles.loadingWrap, { backgroundColor: colors.bg }]}>
+        {renderLoadingBack()}
+        <ErrorState
+          title="视频加载失败"
+          message={loadError ? String(loadError) : '加载失败，请检查网络后重试'}
+          retryLabel="重试"
+          onRetry={handleLoadRetry}
+        />
       </View>
     );
   }
 
   return (
     <PlayerTimeProvider player={player} controlRef={timeControlRef}>
-    <View style={[styles.container, { backgroundColor: colors.bg }]}>
+    {/* V5：整页键盘规避——评论区 TextInput 弹出键盘时底部让位，FlashList 视口随之收缩保持输入框可见 */}
+    <KeyboardAvoidingView style={[styles.container, { backgroundColor: colors.bg }]} behavior="padding" keyboardVerticalOffset={0}>
       <Stack.Screen options={{ headerShown: false, title: info?.title || '视频', gestureEnabled: activeTab === 'intro' }} />
       {/* 手势根：gesture-handler 需要 RootView 才能派发 Pan */}
             <GestureHandlerRootView style={styles.gestureRoot}>
+
+      <View style={styles.page}>
 
       <VideoPlayerStage
         player={player}
@@ -255,7 +303,7 @@ export function VideoScreenView({ controller }: { controller: VideoController })
           }
           player.play();
           showToast('已恢复视频播放');
-        }} style={[styles.audioModeBar, { backgroundColor: colors.card, ...continuous, ...shadow('md', colors.isDark) }]}>
+        }} style={[styles.audioModeBar, { backgroundColor: colors.card, top: playerBaseHeight + 8, ...continuous, ...shadow('md', colors.isDark) }]}>
           <Ionicons name="videocam" size={18} color={ACCENT} />
           <Text style={[T.footnote, { color: colors.text, fontWeight: '600' }]}>恢复视频播放</Text>
         </Press>
@@ -278,6 +326,11 @@ export function VideoScreenView({ controller }: { controller: VideoController })
           />
         </View>
       )}
+
+      {/* ===== Tab 槽位：absolute 撑满 + 动画 paddingTop 让位播放器；tabBar+tabContent 保持文档流 =====
+          #15：滚动过程中列表视口恒定（播放器不再逐帧改高度），收起/展开只做一次性 220ms
+          paddingTop 过渡，FlashList 不再抖动 */}
+      <Animated.View style={[styles.tabSlot, playerSlotStyle]}>
 
       {/* ===== Tab 栏（对齐 Flutter view.dart buildTabBar：tabs 左对齐定宽 + 发弹幕/弹幕开关同行）===== */}
       <View style={[styles.tabBar, { borderBottomColor: colors.separator }]}>
@@ -323,11 +376,17 @@ export function VideoScreenView({ controller }: { controller: VideoController })
                 related={related}
                 onOpenMember={(mid) => router.push(`/member/${mid}` as any)}
                 onOpenRelated={(bvid) => router.push(`/video/${bvid}` as any)}
-                seasonEpisodes={seasonEpisodes}
+                episodeSections={episodeSections}
                 playableCount={playableCount}
                 currentCid={currentCid}
                 onlineCount={onlineCount}
                 aiSummary={aiSummary}
+                aiOutline={aiOutline}
+                onSeekToOutline={seekToTime}
+                episodePanelVisible={episodePanelVisible}
+                onOpenEpisodePanel={openEpisodePanel}
+                onCloseEpisodePanel={closeEpisodePanel}
+                onEpisodeSelect={switchEpisode}
                 followed={followed}
                 onFollow={handleFollow}
                 liked={liked}
@@ -338,8 +397,6 @@ export function VideoScreenView({ controller }: { controller: VideoController })
                 onFav={handleFav}
                 onShare={handleShare}
                 onMore={showMoreMenu}
-                onPageSelect={switchPage}
-                onEpisodeSelect={switchEpisode}
               />
             ) : (
               <View style={[styles.pagePlaceholder, { backgroundColor: colors.bg }]} />
@@ -378,6 +435,8 @@ export function VideoScreenView({ controller }: { controller: VideoController })
           </View>
         </RNGHScrollView>
       </View>
+
+      </Animated.View>
 
       {/* 播放器设置面板 */}
       <PlayerSettingsSheet
@@ -464,9 +523,10 @@ export function VideoScreenView({ controller }: { controller: VideoController })
         </BottomSheet>
       </Host>
 
-      
+      </View>
+
       </GestureHandlerRootView>
-    </View>
+    </KeyboardAvoidingView>
     </PlayerTimeProvider>
   );
 }
@@ -495,14 +555,26 @@ const styles = StyleSheet.create({
   },
   container: { flex: 1 },
   gestureRoot: { flex: 1 },
+  /* #15：播放器 absolute 置顶覆盖，内容（tabBar + tabContent）absolute 撑满由 paddingTop 让位 */
+  page: { flex: 1 },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingBackBtn: {
+    position: 'absolute',
+    left: 14,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   audioModeBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginHorizontal: 16,
-    marginVertical: 8,
+    position: 'absolute',
+    left: 16,
+    right: 16,
     paddingVertical: 12,
     borderRadius: 14,
     borderCurve: 'continuous',
@@ -512,6 +584,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 30,
+  },
+  tabSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
   },
   tabBar: {
     flexDirection: 'row',

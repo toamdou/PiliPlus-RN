@@ -13,7 +13,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { useIsFocused } from 'expo-router';
+import { useIsFocused, usePathname } from 'expo-router';
 import { useSettingsStore } from '@/stores/settings';
 import { useNetwork } from '@/utils/network';
 import { isPowerConstrained, usePowerStateStore } from '@/utils/power-state';
@@ -24,9 +24,24 @@ interface VideoPlayerLike {
   playing?: boolean;
 }
 
+/**
+ * 共享播放器消费屏判定（审计 06-N2/F1 修复）：
+ * 进入这些页面时，旧页（视频详情）的迟到 blur 不应暂停共享播放器——
+ * 全屏页/新视频页挂载即 play，旧页 blur 的 player.pause() 会把刚开始的播放停掉。
+ * 注意 /video/notes 是纯列表页（无播放器），不豁免，仍应暂停。
+ */
+function isPlayerConsumerPath(pathname: string | null): boolean {
+  if (!pathname) return false;
+  if (pathname === '/video/fullscreen' || pathname === '/download/player') return true;
+  if (pathname.startsWith('/pgc/') || pathname.startsWith('/live/')) return true;
+  if (pathname.startsWith('/video/') && !pathname.startsWith('/video/notes')) return true;
+  return false;
+}
+
 export function useFocusAwarePlayer(player: VideoPlayerLike | null) {
   const isFocused = useIsFocused();
   const isFocusedRef = useRef(isFocused);
+  const pathname = usePathname();
   const [isAppActive, setIsAppActive] = useState(() => AppState.currentState === 'active');
   const isAppActiveRef = useRef(isAppActive);
   const playerRef = useRef(player);
@@ -60,12 +75,15 @@ export function useFocusAwarePlayer(player: VideoPlayerLike | null) {
     isAppActiveRef.current = isAppActive;
   }, [isAppActive]);
 
-  // 失去焦点 → 立即暂停
+  // 失去焦点 → 立即暂停。
+  // 但"新焦点路由属于共享播放器消费屏"时豁免：全屏页挂载即 play，
+  // 旧页（详情页）的 blur 在转场结束后才到达，此时的 pause 会把刚开始的播放停掉（06-N2/F1 竞态）。
   useEffect(() => {
     if (!isFocused && player) {
+      if (isPlayerConsumerPath(pathname)) return;
       player.pause();
     }
-  }, [isFocused, player]);
+  }, [isFocused, pathname, player]);
 
   // 页面在后台挂载时也按后台策略处理一次
   useEffect(() => {

@@ -11,11 +11,12 @@ import { SkeletonRow } from '@/components/Skeleton';
 import { LoginGate } from '@/components/LoginGate';
 import { showToast } from '@/utils/toast';
 import type { NativeRequestCancelToken } from '@/utils/request-cancel';
-import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { continuous, RADII, shadow } from '@/theme/tokens';
 import { feedBackMedium } from '@/utils/feedback';
 import { DeltaLogRow } from '@/components/log/DeltaLogRow';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 interface CoinLogItem {
   time: string;
@@ -109,9 +110,6 @@ export default function CoinLogScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         estimatedItemSize={70}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListHeaderComponent={
@@ -134,24 +132,18 @@ export default function CoinLogScreen() {
         }
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>加载失败</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>网络开小差了，试试重新加载</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={styles.retryBtn}>
-                <Text style={[T.subhead, styles.retryBtnText]}>重新加载</Text>
-              </Press>
-            </View>
+            <ErrorState
+              title="加载失败"
+              message="网络开小差了，试试重新加载"
+              onRetry={refresh}
+              retryLabel="重新加载"
+            />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cash-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无硬币记录</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>投币和收到硬币的记录会显示在这里</Text>
-            </View>
+            <EmptyState
+              icon="cash-outline"
+              title="暂无硬币记录"
+              subtitle="投币和收到硬币的记录会显示在这里"
+            />
           )
         }
         renderItem={renderRow}
@@ -187,13 +179,6 @@ const styles = StyleSheet.create({
   balanceIcon: { width: 40, height: 40, borderRadius: RADII.md, justifyContent: 'center', alignItems: 'center', ...continuous },
   balanceInfo: { flex: 1 },
   balanceValue: { fontWeight: '700', marginTop: 1 },
-  /* 空态 / 错误态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8, ...continuous },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10 },
-  retryBtnText: { color: '#FFFFFF', fontWeight: '600' },
   /* 骨架 */
   skeletonOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 14, paddingTop: 12, gap: 12 },
 });

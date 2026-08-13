@@ -92,6 +92,16 @@ export type NativeDownloadRecord = {
   status: NativeDownloadStatus;
   progress: number;
   error?: string;
+  /** 以下为下载元数据（下载内搜索 / 单任务分P详情用），旧记录可能缺失。 */
+  author?: string;
+  bvid?: string;
+  aid?: number;
+  taskId?: string;
+  partIndex?: number;
+  partTitle?: string;
+  partCount?: number;
+  quality?: number;
+  cid?: number;
 };
 
 export type DynamicCheckResult = {
@@ -231,12 +241,23 @@ type NativeCoreModule = {
     title: string,
     pic: string,
     id: string | null,
+    author: string | null,
+    bvid: string | null,
+    aid: number | null,
+    taskId: string | null,
+    partIndex: number | null,
+    partTitle: string | null,
+    partCount: number | null,
+    quality: number | null,
+    cid: number | null,
   ): Promise<string>;
   fetchDownloadsAsync(): Promise<NativeDownloadRecord[]>;
   replaceDownloadRecordsAsync(records: NativeDownloadRecord[]): Promise<boolean>;
   removeDownloadRecordAsync(id: string): Promise<boolean>;
   clearDownloadsAsync(): Promise<boolean>;
   cancelDownloadAsync(id: string): Promise<boolean>;
+  pauseDownloadAsync(id: string): Promise<boolean>;
+  resumeDownloadAsync(id: string): Promise<boolean>;
   fetchPendingCompletionsAsync(): Promise<DownloadPendingCompletion[]>;
   ackDownloadCompletionAsync(id: string): Promise<void>;
   nativeGetCookiesDetailedAsync(domain: string): Promise<NativeDetailedCookie[]>;
@@ -487,6 +508,21 @@ export async function uploadFileAsync(
   return await NativeModule.uploadFileAsync(options);
 }
 
+export type StartDownloadOptions = {
+  title?: string;
+  pic?: string;
+  id?: string | null;
+  author?: string;
+  bvid?: string;
+  aid?: number;
+  taskId?: string;
+  partIndex?: number;
+  partTitle?: string;
+  partCount?: number;
+  quality?: number;
+  cid?: number;
+};
+
 export async function startDownload(
   url: string,
   destinationPath: string,
@@ -494,7 +530,31 @@ export async function startDownload(
   pic = '',
   id: string | null = null,
 ): Promise<string | null> {
-  return await NativeModule.startDownloadAsync(url, destinationPath, title, pic, id);
+  return await NativeModule.startDownloadAsync(url, destinationPath, title, pic, id, null, null, null, null, null, null, null, null, null);
+}
+
+/** 带元数据的下载（下载内搜索 / 单任务分P详情）。 */
+export async function startDownloadWithMeta(
+  url: string,
+  destinationPath: string,
+  options: StartDownloadOptions = {},
+): Promise<string | null> {
+  return await NativeModule.startDownloadAsync(
+    url,
+    destinationPath,
+    options.title ?? '',
+    options.pic ?? '',
+    options.id ?? null,
+    options.author ?? null,
+    options.bvid ?? null,
+    options.aid ?? null,
+    options.taskId ?? null,
+    options.partIndex ?? null,
+    options.partTitle ?? null,
+    options.partCount ?? null,
+    options.quality ?? null,
+    options.cid ?? null,
+  );
 }
 
 export async function fetchDownloads(): Promise<NativeDownloadRecord[]> {
@@ -521,6 +581,14 @@ export async function clearNativeDownloads(): Promise<void> {
 
 export async function cancelDownload(id: string): Promise<boolean> {
   return await NativeModule.cancelDownloadAsync(id);
+}
+
+export async function pauseDownload(id: string): Promise<boolean> {
+  return await NativeModule.pauseDownloadAsync(id);
+}
+
+export async function resumeDownload(id: string): Promise<boolean> {
+  return await NativeModule.resumeDownloadAsync(id);
 }
 
 export async function fetchPendingCompletions(): Promise<DownloadPendingCompletion[]> {

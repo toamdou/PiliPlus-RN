@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeColors } from '@/components/SwiftUIHost';
 import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
+import { BILI } from '@/theme/bili-colors';
 import { RADII, continuous } from '@/theme/tokens';
 import type { Episode, SeasonDetail } from './pgc-types';
 import { PgcTimelineStrip } from './PgcTimelineStrip';
@@ -51,7 +52,7 @@ const EpisodeCell = memo(function EpisodeCell({
             <View
               style={[
                 styles.epPremiumBadge,
-                { backgroundColor: item.badge === '会员' ? '#FB7299' : item.badge === '限免' ? '#34C759' : 'rgba(80,80,84,0.88)', maxWidth: cardW - 8 },
+                { backgroundColor: item.badge === '会员' ? BILI.pink : item.badge === '限免' ? '#34C759' : 'rgba(80,80,84,0.88)', maxWidth: cardW - 8 },
               ]}>
               <Text style={styles.epPremiumText}>{item.badge}</Text>
             </View>
@@ -154,16 +155,18 @@ const styles = StyleSheet.create({
   /* 选集 */
   epHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 12 },
   sectionTitle: { fontWeight: '700' },
-  timeline: { color: '#FF9500', fontWeight: '600' },
+  /* 连载时间线文字：运营星级橙（05-B13，原 #FF9500 硬编码 → BILI.star） */
+  timeline: { color: BILI.star, fontWeight: '600' },
   epCell: { marginBottom: 14 },
   epCoverWrap: { position: 'relative' },
   epCover: { borderRadius: RADII.sm, ...continuous },
-  epBadge: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 5, paddingHorizontal: 5, paddingVertical: 1.5 },
+  /* 选集网格角标圆角统一收敛到 RADII.xs（05-B13，原 5 硬编码） */
+  epBadge: { position: 'absolute', bottom: 4, left: 4, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: RADII.xs, paddingHorizontal: 5, paddingVertical: 1.5 },
   epBadgeText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '600' },
   playingBadge: {
     position: 'absolute', top: 4, right: 4,
     flexDirection: 'row', alignItems: 'center', gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.62)', borderRadius: 5,
+    backgroundColor: 'rgba(0,0,0,0.62)', borderRadius: RADII.xs,
     paddingHorizontal: 5, paddingVertical: 2,
   },
   playingBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
@@ -171,7 +174,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 4,
     left: 4,
-    borderRadius: 5,
+    borderRadius: RADII.xs,
     paddingHorizontal: 5,
     paddingVertical: 2,
   },

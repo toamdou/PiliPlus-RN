@@ -203,9 +203,6 @@ export default function MemberComicScreen() {
         ListEmptyComponent={emptyContent}
         estimatedItemSize={142}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
       />

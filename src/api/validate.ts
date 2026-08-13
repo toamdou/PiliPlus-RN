@@ -4,7 +4,8 @@
  */
 import { apiClient, appClient, post } from './client';
 import { Api } from './endpoints';
-import { signAppParamsAsync } from '@/utils/app-sign';
+import { getCSRF } from '@/utils/cookie';
+import { FORM_HEADERS, formBody } from '@/utils/form';
 
 export const validateApi = {
   /** 激活 buvid（ExClimbWuzhi）——App 启动时调用 */
@@ -32,7 +33,9 @@ export const validateApi = {
           ]],
         },
       };
-      return await post(apiClient, Api.activateBuvidApi, JSON.stringify(payload), undefined, {
+      // R7（03-1.5）：报文须包一层 payload（Flutter init.dart:92-99 `{'payload': json}`），
+      // 直接发裸 JSON 会导致激活无效、风控概率隐性上升。
+      return await post(apiClient, Api.activateBuvidApi, JSON.stringify({ payload }), undefined, {
         headers: { 'Content-Type': 'application/json' },
       });
     } catch {
@@ -40,13 +43,26 @@ export const validateApi = {
     }
   },
 
-  /** Gaia 风控验证注册 */
+  /** Gaia 风控验证注册（R6 解锁链：v_voucher → gaia/register，对齐 Flutter validate.dart gaiaVgateRegister） */
   async gaiaRegister(params: { token: string }) {
-    return post(appClient, Api.gaiaVgateRegister, null, undefined, { params: await signAppParamsAsync(params) });
+    return post(appClient, Api.gaiaVgateRegister, formBody({
+      v_voucher: params.token,
+      ...(getCSRF() ? { csrf: getCSRF() } : {}),
+    }), undefined, {
+      headers: FORM_HEADERS,
+    });
   },
 
-  /** Gaia 风控验证校验 */
-  async gaiaValidate(params: { token: string; code: string }) {
-    return post(appClient, Api.gaiaVgateValidate, null, undefined, { params: await signAppParamsAsync(params) });
+  /** Gaia 风控验证校验（R6 解锁链：geetest 结果 → gaia/validate，对齐 Flutter validate.dart gaiaVgateValidate） */
+  async gaiaValidate(params: { challenge: string; seccode: string; token: string; validate: string }) {
+    return post(appClient, Api.gaiaVgateValidate, formBody({
+      challenge: params.challenge,
+      seccode: params.seccode,
+      token: params.token,
+      validate: params.validate,
+      ...(getCSRF() ? { csrf: getCSRF() } : {}),
+    }), undefined, {
+      headers: FORM_HEADERS,
+    });
   },
 };

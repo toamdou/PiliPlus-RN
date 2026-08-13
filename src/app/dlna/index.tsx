@@ -16,6 +16,8 @@ import {
   type DlnaDevice,
 } from '@/utils/dlna';
 import { showToast } from '@/utils/toast';
+import { PiliPlayer } from 'pili-player';
+import { usePlayerStore } from '@/stores/player';
 
 export default function DlnaScreen() {
   const params = useLocalSearchParams<{ url?: string; title?: string }>();
@@ -29,6 +31,10 @@ export default function DlnaScreen() {
   const [currentKey, setCurrentKey] = useState('');
   const mountedRef = useRef(true);
   const searchIdRef = useRef(0);
+  // 04-3.6：记录本机播放器是否因投屏被暂停，以及投屏时的进度位置，
+  // 停止投屏时据此恢复本机播放（可选续播）。
+  const pausedByCastRef = useRef(false);
+  const castProgressRef = useRef(0);
 
   const search = useCallback(async () => {
     searchIdRef.current += 1;
@@ -76,6 +82,20 @@ export default function DlnaScreen() {
         setCurrentKey(device.key);
         await dlnaSetUrl(device, url, title);
         await dlnaPlay(device);
+        // 04-3.6：投屏成功后暂停本机播放（避免声音双出）+ 记录进度，
+        // 停止投屏时可据此恢复续播。
+        const player = PiliPlayer.shared;
+        if (player.playing) {
+          castProgressRef.current = player.currentTime || 0;
+          try { player.pause(); } catch {}
+          try {
+            usePlayerStore.getState().syncProgress(
+              player.currentTime || 0,
+              player.duration || 0,
+            );
+          } catch {}
+          pausedByCastRef.current = true;
+        }
         showToast(`已投屏到 ${device.friendlyName}`);
       } catch (e) {
         showToast(`投屏失败：${e instanceof Error ? e.message : String(e)}`);
@@ -88,6 +108,17 @@ export default function DlnaScreen() {
     async (device: DlnaDevice) => {
       try {
         await dlnaStop(device);
+        // 04-3.6：停止投屏后恢复本机播放（此前若因投屏被暂停则续播）
+        const player = PiliPlayer.shared;
+        if (pausedByCastRef.current) {
+          pausedByCastRef.current = false;
+          try {
+            const pos = castProgressRef.current;
+            if (pos > 0) player.currentTime = pos;
+            player.play();
+          } catch {}
+        }
+        setCurrentKey('');
         showToast('已停止投屏');
       } catch {
         showToast('停止失败');
@@ -138,9 +169,8 @@ export default function DlnaScreen() {
         keyExtractor={(it) => it.key}
         contentContainerStyle={styles.listContent}
         estimatedItemSize={72}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={searching} onRefresh={search} tintColor={colors.textSecondary} />}
         ListEmptyComponent={
           searching ? null : (

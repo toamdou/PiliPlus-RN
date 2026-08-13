@@ -79,9 +79,8 @@ export default function LoginDevicesScreen() {
         keyExtractor={(it) => it.id || it.name}
         contentContainerStyle={styles.listContent}
         estimatedItemSize={76}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={colors.textSecondary} />}
         ListEmptyComponent={loading ? null : <Text style={[T.headline, styles.empty, { color: colors.text }]}>暂无设备信息</Text>}
         renderItem={renderRow}

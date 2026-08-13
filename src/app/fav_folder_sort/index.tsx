@@ -15,6 +15,7 @@ import { feedBackSelection, feedBackSuccess } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
 
 const rowLayout = fixedItemLayout(76);
 
@@ -168,19 +169,15 @@ export default function FavFolderSortScreen() {
         showsVerticalScrollIndicator={false}
         estimatedItemSize={76}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ItemSeparatorComponent={ItemSeparator}
         ListEmptyComponent={
-          <View style={styles.emptyWrap}>
-            <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-              <Ionicons name="folder-open-outline" size={38} color={colors.textTertiary} />
-            </View>
-            <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>没有可排序的收藏夹</Text>
-            <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>请从收藏页进入本页</Text>
-          </View>
+          <EmptyState
+            icon="folder-open-outline"
+            title="没有可排序的收藏夹"
+            subtitle="请从收藏页进入本页"
+          />
         }
         renderItem={renderRow}
       />
@@ -209,11 +206,6 @@ const styles = StyleSheet.create({
   title: { fontWeight: '600' },
   ops: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   moveBtn: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  /* 空态 */
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
   /* 保存按钮 */
   saveBtn: {
     flexDirection: 'row',

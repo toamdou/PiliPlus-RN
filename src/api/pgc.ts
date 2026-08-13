@@ -14,9 +14,9 @@ export const pgcApi = {
     return get(apiClient, Api.episodeInfo, params, config);
   },
 
-  // 番剧视频流
-  async playUrl(params: { cid: number; bvid?: string; ep_id?: number; qn?: number; fnval?: number }, config?: RequestConfig) {
-    return get(apiClient, Api.pgcUrl, { fnval: 4048, fourk: 1, ...params }, config);
+  // 番剧视频流（R1/04-3.9：fnval 由 4048 纯 DASH 改 0 返回 durl 合流，保证 iOS AVPlayer 有声可播）
+  async playUrl(params: { cid: number; bvid?: string; ep_id?: number; season_id?: number; qn?: number; fnval?: number }, config?: RequestConfig) {
+    return get(apiClient, Api.pgcUrl, { fnval: 0, fourk: 1, ...params }, config);
   },
 
   // 追番

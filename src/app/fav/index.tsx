@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, RefreshControl, ActivityIndicator, LayoutAnimation } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Stack, useRouter, useScrollToTop, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { useReducedMotion } from 'react-native-reanimated';
 import { Host, useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { ConfirmationDialog, Button as SwiftButton, Text as SwiftText } from '@expo/ui/swift-ui';
 import { SkeletonCard } from '@/components/Skeleton';
@@ -19,11 +19,27 @@ import { useType } from '@/components/type-scale';
 import { feedBackMedium, feedBackSelection, feedBackSuccess, openInAppBrowser } from '@/utils/feedback';
 import { stripHtml } from '@/utils/format';
 import { showToast } from '@/utils/toast';
+import EmptyState from '@/components/EmptyState';
+
+/* 行删除收缩动画（05-C3 列表删除规范：高度收缩 250ms + opacity 后再移除数据）。
+   FlashList 2.0.2 无 removingItem prop（该接口为 1.x 旧版），
+   改用 LayoutAnimation.configureNext 触发 RN 布局动画 + FlashList 的
+   prepareForLayoutAnimationRender() 关闭回收池避免动画错位。 */
+function animateRowDelete(reduced: boolean) {
+  if (reduced) return; // 系统"减弱动态效果"时跳过动画，直接移除
+  LayoutAnimation.configureNext({
+    duration: 250,
+    create: { type: 'easeInEaseOut', property: 'opacity' },
+    update: { type: 'easeInEaseOut' },
+    delete: { type: 'easeInEaseOut', property: 'opacity' },
+  });
+}
 
 export default function FavScreen() {
   const router = useRouter();
   const colors = useThemeColors();
   const T = useType();
+  const reducedMotion = useReducedMotion();
   const { isLoggedIn, userInfo } = useAuthStore();
   const params = useLocalSearchParams<{ tab?: string }>();
   const initialTab = TAB_INDEX[params.tab || ''] ?? 0;
@@ -194,13 +210,16 @@ export default function FavScreen() {
         showToast(res?.message || '删除失败');
         return;
       }
+      // 收缩动画：先配置 250ms 高度+透明度布局动画，并关闭回收池，再移除数据
+      animateRowDelete(reducedMotion);
+      listRef.current?.prepareForLayoutAnimationRender?.();
       setItems((prev) => prev.filter((f) => f.id !== item.id));
       feedBackSuccess();
       showToast('已删除');
     } catch {
       showToast('删除失败，请重试');
     }
-  }, []);
+  }, [setItems, reducedMotion]);
 
   const openWeb = useCallback((url: string) => {
     openInAppBrowser(url).catch(() => showToast('无法打开链接'));
@@ -218,21 +237,17 @@ export default function FavScreen() {
 
   const ItemSeparator = useCallback(() => <View style={{ height: isGrid ? 16 : StyleSheet.hairlineWidth }} />, [isGrid]);
 
+  /* 未登录空态（共享 EmptyState + 去登录 children） */
   if (!isLoggedIn) {
     return (
       <View style={[styles.root, { backgroundColor: colors.bg }]}>
         <Stack.Title large>我的收藏</Stack.Title>
         <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
-        <View style={styles.emptyWrap}>
-          <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-            <Ionicons name="person-circle-outline" size={40} color={colors.textTertiary} />
-          </View>
-          <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>请先登录</Text>
-          <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>登录后查看我的收藏</Text>
+        <EmptyState icon="person-circle-outline" title="请先登录" subtitle="登录后查看我的收藏">
           <Press haptic scaleTo={0.94} onPress={() => router.push('/login' as any)} style={styles.loginBtn}>
             <Text style={[T.subhead, styles.loginBtnText]}>去登录</Text>
           </Press>
-        </View>
+        </EmptyState>
       </View>
     );
   }
@@ -260,9 +275,6 @@ export default function FavScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         estimatedItemSize={isGrid ? 200 : 92}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackMedium(); refresh(); }} tintColor={colors.textSecondary} />}
@@ -271,13 +283,8 @@ export default function FavScreen() {
         ListFooterComponent={loadingMore ? <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginVertical: 14 }} /> : null}
         ListEmptyComponent={
           loading ? null : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="folder-open-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无内容</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>这里还没有收藏内容</Text>
-            </View>
+            /* 空态：共享 EmptyState（收敛 33 处 emptyIconBox 复制粘贴） */
+            <EmptyState icon="folder-open-outline" title="暂无内容" subtitle="这里还没有收藏内容" />
           )
         }
         renderItem={renderItem}
@@ -359,10 +366,7 @@ export default function FavScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   listContent: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 40 },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
+  /* 登录按钮 */
   loginBtn: { marginTop: 14, backgroundColor: ACCENT, borderRadius: 20, paddingHorizontal: 30, paddingVertical: 10 },
   loginBtnText: { color: '#FFFFFF', fontWeight: '600' },
   skeletonOverlay: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 14, paddingTop: 12, gap: 16 },

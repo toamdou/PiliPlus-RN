@@ -147,16 +147,16 @@ const styles = StyleSheet.create({
   emojiCell: {
     width: 40,
     height: 40,
-    borderRadius: 8,
+    borderRadius: RADII.thumb,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
   },
   emojiImage: { width: 34, height: 34 },
-  emojiToggle: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  emojiToggle: { width: 36, height: 36, borderRadius: RADII.circle, justifyContent: 'center', alignItems: 'center' },
   /* 输入栏 */
   inputBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   inputField: { flex: 1, borderRadius: RADII.lg, paddingHorizontal: 14, paddingVertical: 8, ...continuous },
   textInput: { fontSize: 14.5 },
-  sendBtn: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
+  sendBtn: { width: 36, height: 36, borderRadius: RADII.circle, justifyContent: 'center', alignItems: 'center' },
 });

@@ -101,9 +101,7 @@ export default function PgcFollowScreen() {
         estimatedItemSize={102}
         overrideItemLayout={rowLayout}
         drawDistance={250}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
+        overrideProps={{ initialDrawBatchSize: 10 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { feedBackMedium(); load(true); }} tintColor={colors.textSecondary} />}
         ListEmptyComponent={
           loading ? null : (

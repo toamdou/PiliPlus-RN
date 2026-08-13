@@ -4,7 +4,7 @@
     "slug": "piliplus",
     "version": "1.0.0",
     "platforms": ["ios"],
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "piliplus",
     "userInterfaceStyle": "automatic",

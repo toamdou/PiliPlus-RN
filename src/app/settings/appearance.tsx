@@ -18,6 +18,9 @@ const THEMES = [
 
 const FONT_SIZES = [12, 13, 14, 15, 16, 18, 20];
 
+/* 批次5 P3：界面缩放档位（uiScale），对齐 Flutter style_settings 的 uiScale 缩放整条字阶 */
+const UI_SCALES = [0.85, 0.9, 1.0, 1.1, 1.15];
+
 const REPLY_LIMITS = [0, 3, 4, 5, 6, 8, 10];
 
 const REPLY_SORTS = [
@@ -99,6 +102,7 @@ export default function AppearanceSettingsScreen() {
 
   const themeIdx = idx(THEMES, (t) => t.value === s.theme);
   const fontIdx = idx(FONT_SIZES, (v) => v === s.fontSize);
+  const uiScaleIdx = idx(UI_SCALES, (v) => v === s.uiScale);
   const replyLimitIdx = idx(REPLY_LIMITS, (v) => v === s.replyLengthLimit);
   const replySortIdx = idx(REPLY_SORTS, (v) => v.value === s.replySortType);
   const dynTypeIdx = idx(DYN_TYPES, (v) => v.value === s.defaultDynamicType);
@@ -142,6 +146,12 @@ export default function AppearanceSettingsScreen() {
               onSelectionChange={(v) => { const i = Number(v); s.set({ fontSize: FONT_SIZES[i] }); }}
               modifiers={[pickerStyle('menu')]}>
               {FONT_SIZES.map((v, i) => <Text key={v} modifiers={[tag(i)]}>{`${v}px`}</Text>)}
+            </Picker>
+            {/* 批次5 P3：界面缩放（uiScale）——与字体大小相乘后整体缩放全站字阶 */}
+            <Picker label="界面缩放" systemImage="arrow.up.left.and.arrow.down.right" selection={uiScaleIdx}
+              onSelectionChange={(v) => { const i = Number(v); s.set({ uiScale: UI_SCALES[i] }); }}
+              modifiers={[pickerStyle('menu')]}>
+              {UI_SCALES.map((v, i) => <Text key={v} modifiers={[tag(i)]}>{v === 1 ? '默认' : `${Math.round(v * 100)}%`}</Text>)}
             </Picker>
             <Toggle label="动态取色" systemImage="wand.and.stars" isOn={s.enableDynamicColor} onIsOnChange={(v) => s.set({ enableDynamicColor: v })} />
             <Toggle label="纯黑主题" systemImage="moon.fill" isOn={s.isPureBlackTheme} onIsOnChange={(v) => s.set({ isPureBlackTheme: v })} />

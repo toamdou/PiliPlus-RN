@@ -1,14 +1,18 @@
 import { View, Text, StyleSheet, ActivityIndicator, TextInput, ActionSheetIOS, Alert, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { ScrollView as RNGHScrollView } from 'react-native-gesture-handler';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ComponentRef, type RefObject } from 'react';
 import { FlashList, type ViewToken } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, withSequence, useReducedMotion } from 'react-native-reanimated';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
-import { Press } from '@/components/motion';
+import { MOTION, Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
+import { RADII, continuous } from '@/theme/tokens';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 import { formatCount, formatTime } from '@/utils/format';
 import { biliCover, biliPreview } from '@/utils/image-url';
 import { replyApi } from '@/api/reply';
@@ -18,6 +22,9 @@ import { useSettingsStore } from '@/stores/settings';
 import { showToast } from '@/utils/toast';
 import { feedBackSuccess, feedBackSelection } from '@/utils/feedback';
 import { storage } from '@/utils/storage';
+import EmotePicker from '@/components/emote/EmotePicker';
+import { EmoteText } from '@/components/emote/EmoteText';
+import { getEmoteMap, type EmoteMap } from '@/api/emote';
 import {
   createNativeRequestCancelToken,
   type NativeRequestCancelToken,
@@ -56,6 +63,9 @@ function replyDraftKey(type: number, oid: number): string {
 
 /** 等级徽章配色（对齐 B 站 Lv0-Lv6 色阶） */
 const LEVEL_COLORS = ['#BFBFBF', '#BFBFBF', '#95DDC7', '#7EC5FF', '#FFB37A', '#FF8C4D', '#FF5C5C'];
+
+/** 排序分段滑块弹簧（05-C3：spring(ratio 0.85, k=350)——damping = 0.85 × 2√350 ≈ 31.8，物理分支） */
+const SORT_SLIDER_SPRING = { damping: +(0.85 * 2 * Math.sqrt(350)).toFixed(2), stiffness: 350, mass: 1 } as const;
 
 interface ReplyPatch {
   like?: number;
@@ -102,6 +112,80 @@ interface VoteState {
   status?: number;
   options?: { opt_idx?: number; opt_desc?: string; cnt?: number; img_url?: string }[];
 }
+
+/* ===== 点赞/踩图标（05-C3 动效规范：spring 1→1.25→1 + 颜色交叉淡入 150ms + haptic light） ===== */
+/**
+ * ActionThumb —— 共享的"点赞/踩"图标按钮。
+ * 实心/描边两个 Ionicons 叠放，激活态进度驱动 opacity 交叉淡入（withTiming 150ms）；
+ * 按下时图标做 withSpring(damping 16, k=260) 缩放爆发（MOTION.springBouncy），
+ * 按压触觉由 Press 的 haptic（light）提供。系统"减弱动态效果"时跳过缩放、直接落色。
+ */
+export const ActionThumb = memo(function ActionThumb({
+  active,
+  size,
+  colors,
+  iconActive,
+  iconIdle,
+  label,
+  onPress,
+}: {
+  /** 是否激活（已赞/已踩） */
+  active: boolean;
+  /** 图标尺寸 pt */
+  size: number;
+  colors: ReturnType<typeof useThemeColors>;
+  /** 激活态图标（实心，如 thumbs-up） */
+  iconActive: ComponentProps<typeof Ionicons>['name'];
+  /** 未激活图标（描边，如 thumbs-up-outline） */
+  iconIdle: ComponentProps<typeof Ionicons>['name'];
+  /** 可选计数文案（如点赞数） */
+  label?: string;
+  onPress: () => void;
+}) {
+  const T = useType();
+  const reducedMotion = useReducedMotion();
+  const scale = useSharedValue(1);
+  // 颜色交叉淡入进度：1=激活色（accent），0=未激活色（tertiary）
+  const fade = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    // 状态变化时 150ms 交叉淡入（对齐 C3：图标颜色交叉淡入 150ms）
+    fade.set(reducedMotion ? (active ? 1 : 0) : withTiming(active ? 1 : 0, { duration: MOTION.duration.quick }));
+  }, [active, reducedMotion, fade]);
+
+  const handlePress = () => {
+    if (!reducedMotion) {
+      // 1 → 1.25 → 1 弹簧爆发（damping 16 / k=260），UI 线程串行播放
+      scale.set(withSequence(
+        withSpring(1.25, MOTION.springBouncy),
+        withSpring(1, MOTION.springBouncy),
+      ));
+    }
+    onPress();
+  };
+
+  const popStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  const activeStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
+  const idleStyle = useAnimatedStyle(() => ({ opacity: 1 - fade.value }));
+
+  return (
+    <Press haptic scaleTo={0.9} onPress={handlePress} style={styles.thumbWrap}>
+      <Animated.View style={[popStyle, { width: size, height: size, alignItems: 'center', justifyContent: 'center' }]}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.thumbLayer, idleStyle]}>
+          <Ionicons name={iconIdle} size={size} color={colors.textTertiary} />
+        </Animated.View>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.thumbLayer, activeStyle]}>
+          <Ionicons name={iconActive} size={size} color={colors.accent} />
+        </Animated.View>
+      </Animated.View>
+      {label != null ? (
+        <Text style={[T.caption1, { color: active ? colors.accent : colors.textTertiary, fontWeight: active ? '600' : '400' }]}>{label}</Text>
+      ) : null}
+    </Press>
+  );
+});
 
 /* ===== 投票卡片（评论区 {vote:123} 富文本，对齐 Flutter showVoteDialog 入口） ===== */
 export const VoteCard = memo(function VoteCard({
@@ -290,6 +374,66 @@ export const CommentSection = memo(function CommentSection({
   const [replyText, setReplyText] = useState('');
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [sendingReply, setSendingReply] = useState(false);
+  /* ===== 表情面板（emote 体系：全站缺口批次5 P0） ===== */
+  const [showEmote, setShowEmote] = useState(false);
+  const [emoteMap, setEmoteMap] = useState<EmoteMap | null>(null);
+
+  // 表情映射表：模块级缓存拉取一次，接口不可用时自动回退内置兜底（[tv_doge] 等）
+  useEffect(() => {
+    let alive = true;
+    getEmoteMap()
+      .then((m) => { if (alive) setEmoteMap(m); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  /* ===== 排序分段滑块（05-C3：滑块 translate spring(0.85, k=350)，禁背景色瞬切） ===== */
+  const reducedMotion = useReducedMotion();
+  const sortTabs = useRef<{ x: number; width: number }[]>([]);
+  const lastSortTapRef = useRef<number | null>(null);
+  const sortSliderX = useSharedValue(0);
+  const sortSliderW = useSharedValue(0);
+  const sortSliderStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: sortSliderX.value }],
+    width: sortSliderW.value,
+  }));
+
+  /** 滑块移动到指定 tab（animate=true 走弹簧；false 直接落位，用于首帧/外部排序变更/减弱动态） */
+  const moveSortSlider = useCallback((idx: number, animate: boolean) => {
+    const layout = sortTabs.current[idx];
+    if (!layout) return;
+    const targetX = layout.x;
+    const targetW = Math.max(layout.width, 40);
+    if (animate && !reducedMotion) {
+      sortSliderX.set(withSpring(targetX, SORT_SLIDER_SPRING));
+      sortSliderW.set(withSpring(targetW, SORT_SLIDER_SPRING));
+    } else {
+      sortSliderX.set(targetX);
+      sortSliderW.set(targetW);
+    }
+  }, [reducedMotion, sortSliderX, sortSliderW]);
+
+  const handleSortTap = useCallback((idx: number) => {
+    if (sortType === idx) return;
+    lastSortTapRef.current = idx;
+    moveSortSlider(idx, true);
+    onSortChange(idx);
+  }, [sortType, moveSortSlider, onSortChange]);
+
+  /** 记录分段按钮布局；激活 tab 首次布局时直接落位（无弹跳） */
+  const registerSortTab = useCallback((idx: number, x: number, width: number) => {
+    sortTabs.current[idx] = { x, width };
+    if (sortType === idx) {
+      sortSliderX.set(x);
+      sortSliderW.set(Math.max(width, 40));
+    }
+  }, [sortType, sortSliderX, sortSliderW]);
+
+  useEffect(() => {
+    // 外部排序变更（如切 P 页后父级恢复排序）时滑块落位；用户点击路径已由 moveSortSlider(true) 处理
+    if (lastSortTapRef.current !== sortType) moveSortSlider(sortType, false);
+    lastSortTapRef.current = null;
+  }, [sortType, moveSortSlider]);
 
   useEffect(() => {
     if (!saveReply || !subjectOid) return;
@@ -329,6 +473,21 @@ export const CommentSection = memo(function CommentSection({
       }
     }, 500);
   }, [saveReply, subjectOid, subjectType]);
+
+  // 表情面板选中：把 [xxx] 文本码拼进输入框
+  const handleEmoteSelect = useCallback((code: string) => {
+    if (replyingTo) {
+      // 正在回复楼中楼：拼进楼中楼输入框
+      setReplyText((prev) => prev + code);
+    } else {
+      // 主评论输入框：拼进草稿文本（同步触发草稿保存）
+      setComposer((prev) => {
+        const next = prev + code;
+        handleComposerChange(next);
+        return next;
+      });
+    }
+  }, [replyingTo, handleComposerChange]);
 
   useEffect(() => {
     return () => {
@@ -688,6 +847,9 @@ export const CommentSection = memo(function CommentSection({
         replyText={replyText}
         replyImage={replyImage}
         sendingReply={sendingReply}
+        emoteMap={emoteMap}
+        emoteActive={showEmote}
+        onEmoteToggle={setShowEmote}
         onToggleSub={onToggleSub}
         onLoadMoreSub={onLoadMoreSub}
         onOpenViewer={onOpenViewer}
@@ -702,7 +864,7 @@ export const CommentSection = memo(function CommentSection({
         onSendReply={sendSubReply}
       />
     ),
-    [displayReplies.length, expandedReplies, colors, T, replyLengthLimit, upMid, myMid, subjectOid, subjectType, replyingTo, replyText, replyImage, sendingReply, onToggleSub, onLoadMoreSub, onOpenViewer, onOpenReplyDetail, onLongPress, toggleLike, toggleHate, openManage, startReply, pickImage, sendSubReply],
+    [displayReplies.length, expandedReplies, colors, T, replyLengthLimit, upMid, myMid, subjectOid, subjectType, replyingTo, replyText, replyImage, sendingReply, emoteMap, showEmote, onToggleSub, onLoadMoreSub, onOpenViewer, onOpenReplyDetail, onLongPress, toggleLike, toggleHate, openManage, startReply, pickImage, sendSubReply],
   );
 
   const ItemSeparator = useCallback(
@@ -722,10 +884,25 @@ export const CommentSection = memo(function CommentSection({
           </Press>
         ) : (
           <View style={[styles.sortSegment, { backgroundColor: colors.fill2 }]}>
-            <Press haptic scaleTo={0.94} onPress={() => onSortChange(0)} style={[styles.sortSegBtn, sortType !== 1 && { backgroundColor: colors.card, ...styles.sortSegActive }]}>
+            {/* 弹簧滑块（05-C3）：选中态由滑块表达，按钮不再瞬切背景色 */}
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.sortSlider, { backgroundColor: colors.card }, sortSliderStyle]}
+            />
+            <Press
+              haptic
+              scaleTo={0.94}
+              onPress={() => handleSortTap(0)}
+              onLayout={(e) => registerSortTab(0, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
+              style={styles.sortSegBtn}>
               <Text style={[T.footnote, { color: sortType !== 1 ? colors.text : colors.textTertiary, fontWeight: sortType !== 1 ? '600' : '400' }]}>最热</Text>
             </Press>
-            <Press haptic scaleTo={0.94} onPress={() => onSortChange(1)} style={[styles.sortSegBtn, sortType === 1 && { backgroundColor: colors.card, ...styles.sortSegActive }]}>
+            <Press
+              haptic
+              scaleTo={0.94}
+              onPress={() => handleSortTap(1)}
+              onLayout={(e) => registerSortTab(1, e.nativeEvent.layout.x, e.nativeEvent.layout.width)}
+              style={styles.sortSegBtn}>
               <Text style={[T.footnote, { color: sortType === 1 ? colors.text : colors.textTertiary, fontWeight: sortType === 1 ? '600' : '400' }]}>最新</Text>
             </Press>
           </View>
@@ -769,6 +946,13 @@ export const CommentSection = memo(function CommentSection({
           />
           <Press
             haptic
+            scaleTo={0.9}
+            onPress={() => setShowEmote((v) => !v)}
+            style={[styles.composerIconBtn, showEmote && { backgroundColor: 'rgba(251,114,153,0.12)' }]}>
+            <Ionicons name="happy-outline" size={19} color={showEmote ? ACCENT : colors.textTertiary} />
+          </Press>
+          <Press
+            haptic
             scaleTo={0.92}
             disabled={!composer.trim() || composing}
             onPress={sendComment}
@@ -777,6 +961,13 @@ export const CommentSection = memo(function CommentSection({
           </Press>
         </View>
       )}
+
+      {/* 表情面板（内联面板，契约 EmotePicker({visible,onSelect(code),onClose})） */}
+      <EmotePicker
+        visible={showEmote}
+        onSelect={handleEmoteSelect}
+        onClose={() => setShowEmote(false)}
+      />
     </View>
   );
 
@@ -786,9 +977,11 @@ export const CommentSection = memo(function CommentSection({
       renderScrollComponent={renderScroll}
       data={displayReplies}
       keyExtractor={(r, idx) => (r.rpid ? `r-${r.rpid}` : `add-${idx}`)}
-      contentContainerStyle={[styles.scrollContent, displayReplies.length > 0 && styles.card]}
+      contentContainerStyle={[styles.scrollContent, displayReplies.length > 0 && styles.card, displayReplies.length > 0 && { backgroundColor: colors.card }]}
       showsVerticalScrollIndicator={false}
       scrollEventThrottle={scrollEventThrottle}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
       onScroll={onScroll}
       onLayout={(e) => { viewHeightRef.current = e.nativeEvent.layout.height; maybeLoadMore(); }}
       onContentSizeChange={(_w, h) => { contentHeightRef.current = h; maybeLoadMore(); }}
@@ -807,17 +1000,18 @@ export const CommentSection = memo(function CommentSection({
       ListHeaderComponent={ListHeader}
       ItemSeparatorComponent={ItemSeparator}
       ListEmptyComponent={
-        <View style={{ alignItems: 'center', paddingTop: 60 }}>
-          <Ionicons name={commentsError ? 'alert-circle-outline' : 'chatbox-ellipses-outline'} size={40} color={colors.textTertiary} />
-          <Text style={[T.footnote, { color: commentsError ? '#FF6B6B' : colors.textTertiary, marginTop: 10 }]}>
-            {commentsError || (searchMode ? '没有找到相关评论' : (commentsLoaded ? '暂无评论' : '加载中…'))}
-          </Text>
-          {commentsError ? (
-            <Press haptic scaleTo={0.97} onPress={onRetry} style={{ marginTop: 12, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.fill1 }}>
-              <Text style={[T.footnote, { color: ACCENT, fontWeight: '600' }]}>重试</Text>
-            </Press>
-          ) : null}
-        </View>
+        commentsError ? (
+          /* #39：错误态统一走共享 ErrorState（品牌胶囊重试按钮） */
+          <ErrorState title="评论加载失败" message={commentsError} onRetry={onRetry} />
+        ) : searchMode ? (
+          <EmptyState icon="search-outline" title="没有找到相关评论" subtitle="换个关键词试试" />
+        ) : (
+          <EmptyState
+            icon="chatbox-ellipses-outline"
+            title={commentsLoaded ? '暂无评论' : '加载中…'}
+            subtitle={commentsLoaded ? '来抢沙发，发第一条友善的评论' : '评论加载中，请稍候'}
+          />
+        )
       }
       ListFooterComponent={
         hasMoreReplies && !searchMode ? (
@@ -849,6 +1043,9 @@ const ReplyRow = memo(function ReplyRow({
   replyText,
   replyImage,
   sendingReply,
+  emoteMap,
+  emoteActive,
+  onEmoteToggle,
   onToggleSub,
   onLoadMoreSub,
   onOpenViewer,
@@ -876,6 +1073,12 @@ const ReplyRow = memo(function ReplyRow({
   replyText: string;
   replyImage: string | null;
   sendingReply: boolean;
+  /** 表情映射表（[xxx] → url），用于评论文本内表情渲染 */
+  emoteMap: EmoteMap | null;
+  /** 表情面板是否打开（楼中楼回复框的 emote 按钮高亮态） */
+  emoteActive: boolean;
+  /** 打开/关闭表情面板（楼中楼回复框的 emote 按钮） */
+  onEmoteToggle: (show: boolean) => void;
   onToggleSub: (rpid: number) => void;
   onLoadMoreSub: (rpid: number) => void;
   onOpenViewer: (images: string[], idx: number) => void;
@@ -906,6 +1109,19 @@ const ReplyRow = memo(function ReplyRow({
 
   const isReplying = replyingTo?.rpid === r.rpid;
 
+  /* ===== "展开全文"（05-B4/06-V8：replyLengthLimit 行截断需有展开入口，收起态仍可收回） ===== */
+  const [msgExpanded, setMsgExpanded] = useState(false);
+  const [msgTruncated, setMsgTruncated] = useState(false);
+  const [msgMeasured, setMsgMeasured] = useState(false);
+  // 隐藏的"全文测量"文本：与可见文案同宽同行高，一次性测量真实行数，用于判断是否被截断
+  const fullMsg = `${isTop ? '[置顶] ' : ''}${r.reply_control?.is_note && !displayMessage.startsWith('[笔记]') ? '[笔记] ' : ''}${displayMessage}`;
+  // FlashList 回收复用时行实例被复用：按 rpid 重置测量/展开状态，避免串数据
+  useEffect(() => {
+    setMsgMeasured(false);
+    setMsgTruncated(false);
+    setMsgExpanded(false);
+  }, [r.rpid]);
+
   return (
     <Press scaleTo={1} onPress={() => {}} onLongPress={() => onLongPress(r)} style={[styles.replyRow, last && { borderBottomColor: colors.separator, borderBottomWidth: StyleSheet.hairlineWidth }]}>
       <ExpoImage
@@ -917,26 +1133,54 @@ const ReplyRow = memo(function ReplyRow({
       />
       <View style={styles.replyBody}>
         <View style={styles.replyNameRow}>
-          <Text style={[styles.replyName, { color: colors.textSecondary }]} numberOfLines={1}>{r.member.uname}</Text>
+          <Text style={[T.subhead, styles.replyName, { color: colors.textSecondary, fontWeight: '600' }]} numberOfLines={1}>{r.member.uname}</Text>
           {level > 0 && (
             <View style={[styles.levelChip, { borderColor: levelColor }]}>
-              <Text style={[styles.levelText, { color: levelColor }]}>{`Lv${level}`}</Text>
+              <Text style={[T.caption2, styles.levelText, { color: levelColor, fontWeight: '700' }]}>{`Lv${level}`}</Text>
             </View>
           )}
           {isUp && (
             <View style={[styles.upChip, { backgroundColor: ACCENT }]}>
-              <Text style={styles.upChipText}>UP</Text>
+              <Text style={[T.caption2, styles.upChipText, { fontWeight: '700' }]}>UP</Text>
             </View>
           )}
         </View>
-        {location ? <Text style={[styles.replyLoc, { color: colors.textTertiary }]}>{` • ${location}`}</Text> : null}
-        <Text style={[styles.replyMsg, { color: colors.text }]} numberOfLines={replyLengthLimit > 0 ? replyLengthLimit : undefined}>
-          {isTop && <Text style={{ color: ACCENT, fontWeight: '700' }}>[置顶] </Text>}
-          {r.reply_control?.is_note && !displayMessage.startsWith('[笔记]') && (
-            <Text style={{ color: ACCENT, fontWeight: '600' }}>[笔记] </Text>
-          )}
-          {displayMessage}
-        </Text>
+        {location ? <Text style={[T.caption1, styles.replyLoc, { color: colors.textTertiary }]}>{` • ${location}`}</Text> : null}
+        <EmoteText
+          text={displayMessage}
+          emotes={emoteMap}
+          style={[T.subhead, { color: colors.text }]}
+          numberOfLines={replyLengthLimit > 0 && !msgExpanded ? replyLengthLimit : undefined}
+          prefix={
+            isTop || (r.reply_control?.is_note && !displayMessage.startsWith('[笔记]')) ? (
+              <Text style={{ color: ACCENT, fontWeight: isTop ? '700' : '600' }}>
+                {isTop ? '[置顶] ' : ''}
+                {r.reply_control?.is_note && !displayMessage.startsWith('[笔记]') ? '[笔记] ' : ''}
+              </Text>
+            ) : undefined
+          }
+        />
+        {/* 全文行数测量（隐藏）：仅首帧执行一次，判定是否需"展开" */}
+        {replyLengthLimit > 0 && !msgExpanded && !msgMeasured ? (
+          <Text
+            pointerEvents="none"
+            style={[T.subhead, styles.msgMeasure]}
+            onTextLayout={(e) => {
+              setMsgMeasured(true);
+              setMsgTruncated(e.nativeEvent.lines.length > replyLengthLimit);
+            }}>
+            {fullMsg}
+          </Text>
+        ) : null}
+        {msgTruncated && !msgExpanded ? (
+          <Press haptic scaleTo={0.95} onPress={() => setMsgExpanded(true)} style={styles.msgExpand}>
+            <Text style={[T.footnote, { color: ACCENT, fontWeight: '600' }]}>展开</Text>
+          </Press>
+        ) : msgExpanded ? (
+          <Press haptic scaleTo={0.95} onPress={() => setMsgExpanded(false)} style={styles.msgExpand}>
+            <Text style={[T.footnote, { color: colors.textTertiary }]}>收起</Text>
+          </Press>
+        ) : null}
         {voteId != null && <VoteCard voteId={voteId} colors={colors} T={T} />}
         {r.content.pictures && r.content.pictures.length > 0 && (
           <View style={styles.replyPics}>
@@ -954,23 +1198,33 @@ const ReplyRow = memo(function ReplyRow({
           </View>
         )}
         <View style={styles.replyMeta}>
-          <Text style={[styles.replyTime, { color: colors.textTertiary }]}>{formatTime(r.ctime)}</Text>
+          <Text style={[T.caption1, styles.replyTime, { color: colors.textTertiary }]}>{formatTime(r.ctime)}</Text>
           {r.reply_control?.is_note ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2, backgroundColor: 'rgba(251,114,153,0.1)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+            <View style={[styles.noteChip, { backgroundColor: 'rgba(251,114,153,0.1)' }]}>
               <Ionicons name="document-text-outline" size={11} color={ACCENT} />
               <Text style={[T.caption1, { color: ACCENT }]}>笔记</Text>
             </View>
           ) : null}
           {r.reply_control?.up_like ? (
-            <Text style={[T.caption1, { color: '#FB7299', fontWeight: '600' }]}>UP主觉得很赞</Text>
+            <Text style={[T.caption1, { color: colors.accent, fontWeight: '600' }]}>UP主觉得很赞</Text>
           ) : null}
-          <Press haptic scaleTo={0.9} onPress={() => onLike(r)} style={styles.replyLike}>
-            <Ionicons name={r.action === 1 ? 'thumbs-up' : 'thumbs-up-outline'} size={12} color={r.action === 1 ? ACCENT : colors.textTertiary} />
-            <Text style={[styles.replyTime, { color: r.action === 1 ? ACCENT : colors.textTertiary }]}>{formatCount(r.like)}</Text>
-          </Press>
-          <Press haptic scaleTo={0.9} onPress={() => onHate(r)} style={styles.replyLike}>
-            <Ionicons name={r.action === 2 ? 'thumbs-down' : 'thumbs-down-outline'} size={12} color={r.action === 2 ? ACCENT : colors.textTertiary} />
-          </Press>
+          <ActionThumb
+            active={r.action === 1}
+            size={12}
+            colors={colors}
+            iconActive="thumbs-up"
+            iconIdle="thumbs-up-outline"
+            label={formatCount(r.like)}
+            onPress={() => onLike(r)}
+          />
+          <ActionThumb
+            active={r.action === 2}
+            size={12}
+            colors={colors}
+            iconActive="thumbs-down"
+            iconIdle="thumbs-down-outline"
+            onPress={() => onHate(r)}
+          />
           <Press haptic scaleTo={0.9} onPress={() => onReply({ rpid: r.rpid, root: r.rpid, parent: r.rpid, name: r.member.uname })}>
             <Ionicons name="chatbox-ellipses-outline" size={13} color={colors.textTertiary} />
           </Press>
@@ -1001,6 +1255,9 @@ const ReplyRow = memo(function ReplyRow({
               <Press haptic scaleTo={0.9} onPress={onPickImage} style={styles.inlineIconBtn}>
                 <Ionicons name="image-outline" size={18} color={replyImage ? ACCENT : colors.textTertiary} />
               </Press>
+              <Press haptic scaleTo={0.9} onPress={() => onEmoteToggle(!emoteActive)} style={styles.inlineIconBtn}>
+                <Ionicons name="happy-outline" size={18} color={emoteActive ? ACCENT : colors.textTertiary} />
+              </Press>
               <Press
                 haptic
                 scaleTo={0.9}
@@ -1023,27 +1280,39 @@ const ReplyRow = memo(function ReplyRow({
               const srReplying = replyingTo?.rpid === sr.rpid;
               return (
                 <View key={sr.rpid} style={styles.subReplyRow}>
-                  <Text style={[{ fontSize: 15, lineHeight: 24 }, { color: colors.text }]}>
-                    <Text style={{ color: ACCENT, fontWeight: '600' }}>{sr.member.uname}</Text>
-                    {`：${srMsg}`}
-                  </Text>
+                  <EmoteText
+                    text={srMsg}
+                    emotes={emoteMap}
+                    style={[T.body, { color: colors.text }]}
+                    prefix={<Text style={{ color: ACCENT, fontWeight: '600' }}>{`${sr.member.uname}：`}</Text>}
+                  />
                   {srVote != null && <VoteCard voteId={srVote} colors={colors} T={T} />}
                   {sr.content.pictures && sr.content.pictures.length > 0 && (
                     <View style={styles.subReplyPics}>
                       {sr.content.pictures.slice(0, 3).map((p, pi) => (
                         <Press key={pi} scaleTo={0.94} onPress={() => onOpenViewer(sr.content.pictures!.map((x) => biliPreview(x.img_src)), pi)}>
-                          <ExpoImage source={{ uri: biliCover(p.img_src, 120, 120) }} recyclingKey={p.img_src} cachePolicy="memory-disk" style={styles.subReplyPic} contentFit="cover" />
+                          <ExpoImage source={{ uri: biliCover(p.img_src, 120, 120) }} recyclingKey={p.img_src} cachePolicy="memory-disk" style={[styles.subReplyPic, { backgroundColor: colors.fill2 }]} contentFit="cover" />
                         </Press>
                       ))}
                     </View>
                   )}
                   <View style={styles.subReplyOps}>
-                    <Press haptic scaleTo={0.9} onPress={() => onLike(sr)}>
-                      <Ionicons name={sr.action === 1 ? 'thumbs-up' : 'thumbs-up-outline'} size={11} color={sr.action === 1 ? ACCENT : colors.textTertiary} />
-                    </Press>
-                    <Press haptic scaleTo={0.9} onPress={() => onHate(sr)}>
-                      <Ionicons name={sr.action === 2 ? 'thumbs-down' : 'thumbs-down-outline'} size={11} color={sr.action === 2 ? ACCENT : colors.textTertiary} />
-                    </Press>
+                    <ActionThumb
+                      active={sr.action === 1}
+                      size={11}
+                      colors={colors}
+                      iconActive="thumbs-up"
+                      iconIdle="thumbs-up-outline"
+                      onPress={() => onLike(sr)}
+                    />
+                    <ActionThumb
+                      active={sr.action === 2}
+                      size={11}
+                      colors={colors}
+                      iconActive="thumbs-down"
+                      iconIdle="thumbs-down-outline"
+                      onPress={() => onHate(sr)}
+                    />
                     <Press haptic scaleTo={0.9} onPress={() => onReply({ rpid: sr.rpid, root: r.rpid, parent: sr.rpid, name: sr.member.uname })}>
                       <Ionicons name="chatbox-ellipses-outline" size={12} color={colors.textTertiary} />
                     </Press>
@@ -1066,6 +1335,9 @@ const ReplyRow = memo(function ReplyRow({
                         />
                         <Press haptic scaleTo={0.9} onPress={onPickImage} style={styles.inlineIconBtn}>
                           <Ionicons name="image-outline" size={18} color={replyImage ? ACCENT : colors.textTertiary} />
+                        </Press>
+                        <Press haptic scaleTo={0.9} onPress={() => onEmoteToggle(!emoteActive)} style={styles.inlineIconBtn}>
+                          <Ionicons name="happy-outline" size={18} color={emoteActive ? ACCENT : colors.textTertiary} />
                         </Press>
                         <Press
                           haptic
@@ -1107,64 +1379,75 @@ const styles = StyleSheet.create({
   scrollContent: { padding: 16, paddingBottom: 80 },
   headerBlock: { gap: 10, marginBottom: 6 },
   sortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingVertical: 2 },
-  sortSegment: { flexDirection: 'row', borderRadius: 9, padding: 2 },
-  sortSegBtn: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 7 },
-  sortSegActive: {
+  sortSegment: { flexDirection: 'row', borderRadius: RADII.sm, padding: 2, ...continuous },
+  sortSegBtn: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: RADII.md },
+  /* 排序分段滑块（05-C3：滑块位移动画替代背景色瞬切；圆角对齐内嵌分段按钮） */
+  sortSlider: {
+    position: 'absolute',
+    top: 2,
+    bottom: 2,
+    left: 0,
+    borderRadius: RADII.md,
+    ...continuous,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.12,
     shadowRadius: 2,
     elevation: 1,
   },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 2 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: RADII.md, paddingHorizontal: 10, paddingVertical: 2, ...continuous },
   searchInput: { flex: 1, paddingVertical: 7 },
-  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 4 },
-  composerSend: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, borderRadius: RADII.md, paddingHorizontal: 10, paddingVertical: 4, ...continuous },
+  composerSend: { width: 30, height: 30, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  composerIconBtn: { width: 30, height: 30, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   card: {
-    borderRadius: 18,
-    backgroundColor: 'transparent',
+    borderRadius: RADII.lg,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(120,120,128,0.12)',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.6,
-    shadowRadius: 6,
-    elevation: 2,
+    ...continuous,
   },
   replySeparator: { height: StyleSheet.hairlineWidth },
   loadMoreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   replyRow: { flexDirection: 'row', gap: 12, paddingVertical: 14 },
-  replyAvatar: { width: 36, height: 36, borderRadius: 18 },
+  replyAvatar: { width: 36, height: 36, borderRadius: RADII.circle },
   replyBody: { flex: 1, gap: 3 },
   replyNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  replyName: { fontSize: 14, fontWeight: '600', flexShrink: 1 },
-  levelChip: { borderWidth: 1, borderRadius: 4, paddingHorizontal: 3, paddingVertical: 0.5 },
-  levelText: { fontSize: 10, fontWeight: '700', lineHeight: 13 },
-  upChip: { borderRadius: 4, paddingHorizontal: 4, paddingVertical: 1 },
-  upChipText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700', lineHeight: 12 },
-  replyLoc: { fontSize: 12, lineHeight: 16, marginTop: -1 },
-  replyMsg: { fontSize: 15, lineHeight: 24 },
+  replyName: { flexShrink: 1 },
+  levelChip: { borderWidth: 1, borderRadius: RADII.xs, paddingHorizontal: 3, paddingVertical: 0.5 },
+  levelText: {},
+  upChip: { borderRadius: RADII.xs, paddingHorizontal: 4, paddingVertical: 1 },
+  upChipText: { color: '#FFFFFF', lineHeight: 12 },
+  replyLoc: { marginTop: -1 },
+  replyMsg: {},
   replyMeta: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2, flexWrap: 'wrap' },
-  replyTime: { fontSize: 12, lineHeight: 16 },
-  replyLike: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  replyTime: {},
+  thumbWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  thumbLayer: { alignItems: 'center', justifyContent: 'center' },
   replyReply: { fontWeight: '500' },
   replyPics: { flexDirection: 'row', gap: 6, marginTop: 8 },
-  replyPic: { width: 80, height: 80, borderRadius: 8 },
-  inlineReplyBox: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 8, gap: 6 },
+  replyPic: { width: 80, height: 80, borderRadius: RADII.thumb, ...continuous },
+  inlineReplyBox: { borderRadius: RADII.md, paddingHorizontal: 10, paddingVertical: 8, marginTop: 8, gap: 6, ...continuous },
   inlineReplyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   inlineReplyInput: { flex: 1, paddingVertical: 4 },
-  inlineIconBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  inlineReplyPic: { width: 72, height: 72, borderRadius: 8 },
-  subReplyBox: { borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8, gap: 6 },
+  inlineIconBtn: { width: 28, height: 28, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center' },
+  inlineReplyPic: { width: 72, height: 72, borderRadius: RADII.thumb, ...continuous },
+  subReplyBox: { borderRadius: RADII.md, paddingHorizontal: 12, paddingVertical: 8, marginTop: 8, gap: 6, ...continuous },
   subReplyRow: { paddingVertical: 3 },
   subReplyPics: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  subReplyPic: { width: 60, height: 60, borderRadius: 7 },
+  subReplyPic: { width: 60, height: 60, borderRadius: RADII.thumb, ...continuous },
   subReplyOps: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 2 },
   subReplyMore: { paddingTop: 4 },
-  voteCard: { borderRadius: 10, padding: 10, marginTop: 6, gap: 6 },
+  voteCard: { borderRadius: RADII.md, padding: 10, marginTop: 6, gap: 6, ...continuous },
   voteHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   voteTitle: { flex: 1, fontWeight: '600' },
-  voteOption: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 8 },
+  voteOption: { borderRadius: RADII.md, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', paddingHorizontal: 10, paddingVertical: 8, ...continuous },
   voteOptionFill: { position: 'absolute', top: 0, left: 0, bottom: 0 },
   voteOptionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   voteOptionText: { flex: 1 },
+  /* "展开/收起"入口：主评论区与投票卡片之间留 2pt 呼吸间距 */
+  msgExpand: { alignSelf: 'flex-start', marginTop: 2 },
+  /* 全文行数测量（隐藏、零尺寸），仅用于 onTextLayout 判定是否截断 */
+  msgMeasure: { position: 'absolute', opacity: 0, left: 0, right: 0 },
+  /* 笔记徽章（收敛内联样式：圆角走 token、底色保留品牌粉 dim） */
+  noteChip: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 5, paddingVertical: 1, borderRadius: RADII.xs },
 });

@@ -32,6 +32,9 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
     private var pendingDestinations: [String: URL] = [:]
     private var lastProgressAt: [String: Date] = [:]
     private var lastProgressFraction: [String: Double] = [:]
+    /// 用户主动暂停的任务 id 集合：取消的 URLSession 任务回调 didCompleteWithError 时据此跳过错误处理，
+    /// 保留 state 供 resumeDownload 恢复（后台 session 不支持 resumeData，恢复 = 用缓存的流 URL 重开任务）。
+    private var pausedIds: Set<String> = []
     private var didRestorePersistedState = false
     private var didRestoreRecords = false
     private var recordsPersistGeneration = 0
@@ -96,7 +99,16 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
         destinationPath: String,
         title: String? = nil,
         pic: String? = nil,
-        id: String? = nil
+        id: String? = nil,
+        author: String? = nil,
+        bvid: String? = nil,
+        aid: Double? = nil,
+        taskId: String? = nil,
+        partIndex: Double? = nil,
+        partTitle: String? = nil,
+        partCount: Double? = nil,
+        quality: Double? = nil,
+        cid: Double? = nil
     ) throws -> String {
         guard let url = URL(string: urlString) else {
             throw PiliNetworkError.invalidURL
@@ -125,7 +137,16 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
             url: url,
             destination: destination,
             title: title,
-            pic: pic
+            pic: pic,
+            author: author,
+            bvid: bvid,
+            aid: aid,
+            taskId: taskId,
+            partIndex: partIndex,
+            partTitle: partTitle,
+            partCount: partCount,
+            quality: quality,
+            cid: cid
         )
         lock.unlock()
         persistState(for: downloadId)
@@ -185,6 +206,7 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
     func cancelDownload(id: String) -> Bool {
         restorePersistedStateIfNeeded()
         lock.lock()
+        pausedIds.remove(id)
         let destination = pendingDestinations[id] ?? states[id]?.destination
         let removed = states.removeValue(forKey: id) != nil
         let removedPending = pendingDestinations.removeValue(forKey: id) != nil
@@ -216,6 +238,7 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
         pendingDestinations.removeAll()
         lastProgressAt.removeAll()
         lastProgressFraction.removeAll()
+        pausedIds.removeAll()
         records.removeAll()
         lock.unlock()
         clearPendingCompletions()
@@ -231,6 +254,58 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
                 }
             }
         }
+        return true
+    }
+
+    /// 暂停下载：取消 URLSession 任务但保留 state/记录，供 resumeDownload 恢复。
+    /// 后台 background session 不支持 resumeData，因此"暂停"只是取消任务并标记，
+    /// "恢复"会用缓存的流 URL 重开一个全新任务（进度从头走，符合"缓存当前流 URL"模型）。
+    func pauseDownload(id: String) -> Bool {
+        restorePersistedStateIfNeeded()
+        lock.lock()
+        guard states[id] != nil else {
+            lock.unlock()
+            return false
+        }
+        pausedIds.insert(id)
+        lock.unlock()
+        updateRecord(id: id) { record in
+            record["status"] = "paused"
+        }
+        persistRecord(id)
+        emit("onDownloadStateChange", ["id": id, "state": "paused"])
+        session.getAllTasks { tasks in
+            tasks.first { $0.taskDescription == id }?.cancel()
+        }
+        return true
+    }
+
+    /// 恢复暂停的下载：用缓存的流 URL 重开任务（后台 session 无 resumeData 支持）。
+    func resumeDownload(id: String) -> Bool {
+        restorePersistedStateIfNeeded()
+        lock.lock()
+        pausedIds.remove(id)
+        guard let state = states[id], let url = state.url else {
+            lock.unlock()
+            return false
+        }
+        lock.unlock()
+        var request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 60)
+        request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Referer")
+        let task = session.downloadTask(with: request)
+        task.taskDescription = id
+        lock.lock()
+        pendingDestinations[id] = state.destination
+        lock.unlock()
+        persistState(for: id)
+        updateRecord(id: id) { record in
+            record["status"] = "downloading"
+            record["progress"] = 0.0
+            record.removeValue(forKey: "error")
+        }
+        persistRecord(id)
+        emit("onDownloadStateChange", ["id": id, "state": "resumed"])
+        task.resume()
         return true
     }
 
@@ -391,7 +466,19 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
             return
         }
         lock.lock()
-        let state = states.removeValue(forKey: id)
+        let isPaused = pausedIds.remove(id) != nil
+        let state = states[id]
+        lock.unlock()
+        // 用户主动暂停触发的取消：保留 state 供 resumeDownload 恢复，不做错误处理。
+        if isPaused {
+            updateRecord(id: id) { record in
+                record["status"] = "paused"
+            }
+            persistRecord(id)
+            return
+        }
+        lock.lock()
+        states.removeValue(forKey: id)
         pendingDestinations.removeValue(forKey: id)
         lastProgressAt.removeValue(forKey: id)
         lastProgressFraction.removeValue(forKey: id)
@@ -462,9 +549,18 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
         url: URL,
         destination: URL,
         title: String?,
-        pic: String?
+        pic: String?,
+        author: String? = nil,
+        bvid: String? = nil,
+        aid: Double? = nil,
+        taskId: String? = nil,
+        partIndex: Double? = nil,
+        partTitle: String? = nil,
+        partCount: Double? = nil,
+        quality: Double? = nil,
+        cid: Double? = nil
     ) -> [String: Any] {
-        [
+        var record: [String: Any] = [
             "id": id,
             "title": title ?? "",
             "pic": pic ?? "",
@@ -475,6 +571,17 @@ public final class PiliDownloadManager: NSObject, URLSessionDownloadDelegate {
             "status": "downloading",
             "progress": 0.0,
         ]
+        // 元数据（下载内搜索 / 单任务分P详情用）：仅写入非空字段，保持旧记录兼容。
+        if let author { record["author"] = author }
+        if let bvid { record["bvid"] = bvid }
+        if let aid { record["aid"] = aid }
+        if let taskId { record["taskId"] = taskId }
+        if let partIndex { record["partIndex"] = partIndex }
+        if let partTitle { record["partTitle"] = partTitle }
+        if let partCount { record["partCount"] = partCount }
+        if let quality { record["quality"] = quality }
+        if let cid { record["cid"] = cid }
+        return record
     }
 
     private func updateRecord(id: String, mutate: (inout [String: Any]) -> Void) {

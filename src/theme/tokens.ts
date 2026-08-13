@@ -13,11 +13,16 @@
  */
 import { DynamicColorIOS } from 'react-native';
 import type { ViewStyle } from 'react-native';
+import type { GlassVariant } from '@/components/Glass';
 
 /* ================= 圆角阶梯（连续曲率） ================= */
 export const RADII = {
+  /** 徽章 / tag / 角标（替换历史硬编码 3/4/5/6） */
+  xs: 6,
   /** 小元素：chip / badge / 分段按钮 */
   sm: 10,
+  /** 所有媒体缩略图（登记 DynamicMedia 的事实标准） */
+  thumb: 8,
   /** 按钮 / 输入框 / pill */
   md: 14,
   /** 卡片（紧凑双列） */
@@ -105,7 +110,6 @@ export const DYN = {
 } as const;
 
 /* ================= 玻璃预设（GlassView 调用约定） ================= */
-import type { GlassVariant } from '@/components/Glass';
 
 export const GLASS = {
   /** 浮动搜索框 / 工具条：标准材质 */

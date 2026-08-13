@@ -10,6 +10,7 @@ import {
 } from '@expo/ui/swift-ui';
 import { pickerStyle, tag, tint } from '@expo/ui/swift-ui/modifiers';
 import { useSettingsStore } from '@/stores/settings';
+import { PiliPlayer } from 'pili-player';
 
 const FAST_DURATIONS = [5, 10, 15];
 const SLIDE_DURATIONS = [25, 50, 90, 100];
@@ -147,6 +148,18 @@ export default function PlaybackSettingsScreen() {
             <Toggle label="全屏显示锁定按钮" systemImage="lock" isOn={s.showFSLockBtn} onIsOnChange={(v) => s.set({ showFSLockBtn: v })} />
             <Toggle label="全屏显示截图按钮" systemImage="camera" isOn={s.showFsScreenshotBtn} onIsOnChange={(v) => s.set({ showFsScreenshotBtn: v })} />
             <Toggle label="全屏显示电池电量" systemImage="battery.75" isOn={s.showBatteryLevel} onIsOnChange={(v) => s.set({ showBatteryLevel: v })} />
+          </Section>
+
+          <Section title="画中画">
+            <Toggle label="后台画中画" systemImage="pip" isOn={s.enablePiP}
+              onIsOnChange={(v) => {
+                s.set({ enablePiP: v });
+                // 同步原生：进入后台自动拉起系统 PiP 小窗的开关。
+                // 真机验收：需在工程开启 com.apple.developer.avfoundation.picture-in-picture entitlement。
+                PiliPlayer.shared.setPiPEnabled(v);
+              }} />
+            <Toggle label="画中画不加载弹幕" systemImage="captions.bubble" isOn={s.enablePiPNoDanmaku}
+              onIsOnChange={(v) => s.set({ enablePiPNoDanmaku: v })} />
           </Section>
 
           <Section title="SuperChat">

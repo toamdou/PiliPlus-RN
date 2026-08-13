@@ -28,6 +28,8 @@ import { useAuthStore } from '@/stores/auth';
 import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
 import { RADII, continuous } from '@/theme/tokens';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 import { feedBackMedium } from '@/utils/feedback';
 import { showToast } from '@/utils/toast';
 import { biliCover } from '@/utils/image-url';
@@ -217,9 +219,6 @@ export default function LiveFollowScreen() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
         estimatedItemSize={220}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={
@@ -229,25 +228,16 @@ export default function LiveFollowScreen() {
         }
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>{error}</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={styles.retryBtn}>
-                <Text style={[T.subhead, styles.retryBtnText]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState
+              title={typeof error === 'string' ? error : '加载失败'}
+              onRetry={refresh}
+            />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="radio-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无关注的直播</Text>
-              <Text style={[T.footnote, styles.emptySub, { color: colors.textSecondary }]}>
-                关注的UP开播后会出现在这里
-              </Text>
-            </View>
+            <EmptyState
+              icon="radio-outline"
+              title="暂无关注的直播"
+              subtitle="关注的UP开播后会出现在这里"
+            />
           )
         }
         renderItem={renderItem}
@@ -342,32 +332,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cardAuthor: {},
-  /* 空态 / 错误态 */
-  emptyWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 110,
-    paddingHorizontal: 40,
-    gap: 8,
-  },
-  emptyIconBox: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  emptyTitle: { fontWeight: '600' },
-  emptySub: { textAlign: 'center' },
-  retryBtn: {
-    marginTop: 14,
-    backgroundColor: ACCENT,
-    borderRadius: RADII.lg,
-    paddingHorizontal: 30,
-    paddingVertical: 10,
-  },
-  retryBtnText: { color: '#FFFFFF', fontWeight: '600' },
   /* 骨架 */
   skeletonWrap: {
     position: 'absolute',

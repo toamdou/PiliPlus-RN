@@ -14,6 +14,9 @@ const DATA = 'FcwAPNKTMug3GV5Lj7EJnHpWsx4tb8haYeviqBz6rkCy12mUSDQX9RdoZf';
 
 /** av 转 bv */
 export function av2bv(aid: number): string {
+  // 非法输入防护（审计 06-C1/N7）：BigInt(NaN)/BigInt(非有限数) 会抛 RangeError，
+  // 通知页 subjectId 等来源可能传入 NaN/undefined，直接返回空串让调用方走兜底，不崩溃。
+  if (!Number.isFinite(aid) || aid < 0 || aid > Number.MAX_SAFE_INTEGER) return '';
   const bytes = ['B', 'V', '1', '0', '0', '0', '0', '0', '0', '0', '0', '0'];
   let bvIndex = bytes.length - 1;
   let tmp = (MAX_AID | BigInt(aid)) ^ XOR_CODE;

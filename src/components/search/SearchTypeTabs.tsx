@@ -4,8 +4,8 @@ import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { useType } from '@/components/type-scale';
 import { RADII, continuous } from '@/theme/tokens';
 
-export const CATEGORIES = ['视频', '番剧', '影视', '直播间', '用户', '专栏'];
-export const SEARCH_TYPES = ['video', 'media_bangumi', 'media_ft', 'live_room', 'bili_user', 'article'];
+export const CATEGORIES = ['综合', '视频', '番剧', '影视', '直播间', '用户', '专栏'];
+export const SEARCH_TYPES = ['all', 'video', 'media_bangumi', 'media_ft', 'live_room', 'bili_user', 'article'];
 export const ORDERS = ['默认排序', '播放多', '新发布', '弹幕多', '收藏多'];
 export const ORDER_VALUES = ['totalrank', 'click', 'pubdate', 'dm', 'stow'];
 

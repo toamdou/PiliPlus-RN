@@ -17,6 +17,8 @@ import { formatCount, formatDuration } from '@/utils/format';
 import { showToast } from '@/utils/toast';
 import { fixedItemLayout } from '@/utils/list-layout';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
+import ErrorState from '@/components/ErrorState';
 
 const rowLayout = fixedItemLayout(112);
 
@@ -156,12 +158,14 @@ export default function FavSearchScreen() {
       <View style={[styles.root, { backgroundColor: colors.bg }]}>
         <Stack.Title large>收藏搜索</Stack.Title>
         <Stack.Header blurEffect="systemMaterial" style={{ shadowColor: 'transparent' }} />
-        <View style={styles.emptyWrap}>
-          <Text style={[T.headline, { color: colors.text }]}>请先登录</Text>
+        <EmptyState
+          icon="lock-closed-outline"
+          title="请先登录"
+          subtitle="登录后可使用收藏搜索">
           <Press haptic scaleTo={0.94} onPress={() => router.push('/login' as any)} style={[styles.loginBtn, { backgroundColor: ACCENT }]}>
             <Text style={[T.subhead, styles.loginText]}>去登录</Text>
           </Press>
-        </View>
+        </EmptyState>
       </View>
     );
   }
@@ -209,30 +213,17 @@ export default function FavSearchScreen() {
         onEndReachedThreshold={0.4}
         estimatedItemSize={112}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListFooterComponent={loadingMore ? <ActivityIndicator size="small" color={colors.textTertiary} style={{ marginVertical: 14 }} /> : null}
         ListEmptyComponent={
           loading ? null : error ? (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="cloud-offline-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text }]}>{error}</Text>
-              <Press haptic scaleTo={0.94} onPress={refresh} style={[styles.loginBtn, { backgroundColor: ACCENT }]}>
-                <Text style={[T.subhead, styles.loginText]}>重试</Text>
-              </Press>
-            </View>
+            <ErrorState title={typeof error === 'string' ? error : '加载失败'} onRetry={refresh} />
           ) : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="search-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, { color: colors.text }]}>{folderId ? (keyword ? '没有匹配的收藏' : '暂无收藏内容') : '请选择收藏夹'}</Text>
-            </View>
+            <EmptyState
+              icon="search-outline"
+              title={folderId ? (keyword ? '没有匹配的收藏' : '暂无收藏内容') : '请选择收藏夹'}
+            />
           )
         }
         renderItem={renderItem}
@@ -262,8 +253,6 @@ const styles = StyleSheet.create({
   info: { flex: 1, gap: 5, justifyContent: 'center' },
   title: { fontWeight: '600' },
   statRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 110, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
   loginBtn: { marginTop: 14, borderRadius: RADII.lg, paddingHorizontal: 30, paddingVertical: 10, ...continuous },
   loginText: { color: '#FFFFFF', fontWeight: '600' },
   skeletonCard: { position: 'absolute', top: 0, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 8, gap: 4, ...continuous },

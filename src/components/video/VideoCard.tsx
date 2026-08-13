@@ -183,8 +183,11 @@ function VideoCardBase({ item, mode, delay = 0, onDisliked }: VideoCardProps) {
 
 export const VideoCard = memo(VideoCardBase);
 
-/* FlashList 2.0.2 的类型声明未包含首页及审计计划在用的 v1 风格调优 props，
-   这里做最小合并，保持全站列表配置写法一致（运行时由列表内部版本决定生效项）。 */
+/* FlashList 2.0.2 类型声明（FlashListProps.d.ts）未内置 v1 风格调优 props。
+   迁移后：已改用 v2 等价 API（drawDistance / overrideProps.initialDrawBatchSize）；
+   estimatedItemSize 被全站 76 处继续使用且 v2 运行时自动测高会忽略它；
+   windowSize/initialNumToRender/maxToRenderPerBatch 仅剩范围外遗留组件（评论区/回复弹层等）在用。
+   删除本 augmentation 会导致这些文件 tsc 报错，故保留做最小类型合并。 */
 declare module '@shopify/flash-list' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface FlashListProps<TItem> {

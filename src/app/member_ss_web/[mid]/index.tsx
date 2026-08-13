@@ -295,9 +295,6 @@ export default function MemberSsWebScreen() {
           }
           estimatedItemSize={96}
           overrideItemLayout={archiveLayout}
-          windowSize={9}
-          initialNumToRender={10}
-          maxToRenderPerBatch={12}
           drawDistance={250}
           overrideProps={{ initialDrawBatchSize: 10 }}
         />
@@ -358,9 +355,6 @@ export default function MemberSsWebScreen() {
           )
         }
         estimatedItemSize={104}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
       />

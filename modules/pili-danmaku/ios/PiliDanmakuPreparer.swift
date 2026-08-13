@@ -116,14 +116,18 @@ enum PiliDanmakuPreparer {
         let modeRaw = item["mode"] as? Int ?? 0
         let mode: String
         let duration: Double
-        if modeRaw == 1 {
+        // 批次5 P1：顶部固定弹幕原始 mode 为 5/6/7（底部固定为 4，滚动为 1/2/3）。
+        // 原生渲染管线只支持 scroll/top/bottom 三类；mode 2/3 与 6/7 分别归类到
+        // scroll/top，保证这些弹幕不再被丢弃（原先只在 1/4/5 时才保留）。
+        switch modeRaw {
+        case 1, 2, 3:
             mode = "scroll"
             duration = max(0, dmSpeed)
-        } else if modeRaw == 5 {
-            mode = "top"
-            duration = max(0, staticDuration)
-        } else {
+        case 4:
             mode = "bottom"
+            duration = max(0, staticDuration)
+        default:
+            mode = "top"
             duration = max(0, staticDuration)
         }
 

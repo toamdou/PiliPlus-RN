@@ -1,7 +1,8 @@
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeColors } from '@/components/SwiftUIHost';
+import { IoSToggle } from '@/components/IoSToggle';
 import { useType } from '@/components/type-scale';
 import { Press } from '@/components/motion';
 import { useSettingsStore } from '@/stores/settings';
@@ -51,10 +52,9 @@ export default function ColorSelectScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={[styles.row, { borderBottomColor: colors.separator }]}>
             <Text style={[T.body, styles.rowLabel, { color: colors.text }]}>动态取色</Text>
-            <Switch
+            <IoSToggle
               value={s.enableDynamicColor}
               onValueChange={(v) => s.set({ enableDynamicColor: v })}
-              trackColor={{ true: colors.accent, false: colors.fill3 }}
             />
           </View>
           <View style={styles.grid}>

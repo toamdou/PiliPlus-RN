@@ -53,7 +53,11 @@ export default function TabsLayout() {
   const hideBottomBar = useSettingsStore((s) => s.hideBottomBar);
   /* 底栏显隐：
      iOS 26+：由原生 minimizeBehavior="onScrollDown" 处理（液态玻璃 pill 平滑收缩动画）；
-     iOS<26：由 useScrollHideTabBar 按滚动方向驱动 store → hidden prop 瞬时切换。 */
+     iOS<26：useScrollHideTabBar 按滚动方向写 store → hidden prop 瞬时切换（原生动画缺位）。
+     #42a：瞬时的原生切换无法从 JS 侧做 translate（UITabBar 是 UITabBarController 内的
+     原生视图，非 React 托管，RNS 对 tabBarHidden 硬编码 animated:NO）——
+     因此 JS 侧过渡由 useScrollHideTabBar 返回的 retract 收帘进度承担：消费页（如动态页）
+     用它驱动底部玻璃帘与 FAB 的 translate/opacity 弹簧，把"闪没闪回"柔化为平滑收放。 */
   const hidden = useTabBarStore((s) => s.hidden);
   const setHidden = useTabBarStore((s) => s.setHidden);
 
@@ -88,6 +92,10 @@ export default function TabsLayout() {
           <NativeTabs.Trigger.Label>首页</NativeTabs.Trigger.Label>
         </NativeTabs.Trigger>
         <NativeTabs.Trigger name="dynamics">
+          {/* 动态 Tab 图标：#40a 核查后维持现状——SF Symbols 里
+              antenna.radiowaves.left.and.right 无 .fill 面性变体（仅 .circle/.slash 等变体，
+              .circle.fill 语义不符），强行换符号会破坏"动态/信号"隐喻一致性；
+              选中态仍靠 tintColor 高亮（见 05-ios-design.md A3）。 */}
           <NativeTabs.Trigger.Icon
             sf={{ default: 'antenna.radiowaves.left.and.right', selected: 'antenna.radiowaves.left.and.right' }}
           />

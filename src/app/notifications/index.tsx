@@ -22,6 +22,7 @@ import { feedBackMedium, feedBackSuccess, openInAppBrowser } from '@/utils/feedb
 import { RADII, continuous, shadow } from '@/theme/tokens';
 import { showToast } from '@/utils/toast';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
 
 interface NotifyItem {
   id: number;
@@ -51,14 +52,17 @@ const PAGE_SIZE = 20;
 
 function resolveNotifyHref(item: NotifyItem): string | null {
   const native = item.nativeUri || '';
-  const video = /bilibili:\/\/video\/(\d+)/.exec(native);
-  if (video) return `/video/${av2bv(Number(video[1]))}`;
+  // 带评论定位的 video 链接必须先于普通 video 正则匹配（N5：原顺序先命中普通 video 先返回，
+  // 导致 comment_root_id 分支永不可达，评论定位永远失效）
   const videoComment = /bilibili:\/\/video\/(\d+)\?.*comment_root_id=(\d+)/.exec(native);
   if (videoComment) return `/main_reply/${videoComment[1]}?type=1&rootId=${videoComment[2]}`;
+  const video = /bilibili:\/\/video\/(\d+)/.exec(native);
+  if (video) return `/video/${av2bv(Number(video[1]))}`;
   const season = /bilibili:\/\/bangumi\/season\/(\d+)/.exec(native);
   if (season) return `/pgc/${season[1]}`;
+  // ep 链接走 ep_id 深链（N4：pgc/[id] 按 ep_ 前缀区分 ep/season，由并行代理 A 处理）
   const pgcEp = /bilibili:\/\/pgc\/season\/ep\/(\d+)/.exec(native);
-  if (pgcEp) return `/pgc/${pgcEp[1]}`;
+  if (pgcEp) return `/pgc/ep_${pgcEp[1]}`;
   const article = /bilibili:\/\/article\/(\d+)/.exec(native);
   if (article) return `https://www.bilibili.com/read/cv${article[1]}`;
   const live = /bilibili:\/\/live\/(\d+)/.exec(native);
@@ -76,8 +80,12 @@ function resolveNotifyHref(item: NotifyItem): string | null {
   const browser = /bilibili:\/\/browser\/?\?url=([^&]+)/.exec(native);
   if (browser) return decodeURIComponent(browser[1]);
 
-  if (item.business === 'archive' && item.subjectId) return `/video/${av2bv(item.subjectId)}`;
-  if (item.business === 'pgc') return `/pgc/${item.businessId || item.subjectId || ''}`;
+  if (item.business === 'archive' && item.subjectId && Number.isFinite(Number(item.subjectId))) {
+    return `/video/${av2bv(Number(item.subjectId))}`;
+  }
+  // N6：businessId/subjectId 双空时不再拼出裸 `/pgc/`（无 +not-found 兜底会抛路由异常）
+  const pgcId = item.businessId || item.subjectId;
+  if (item.business === 'pgc' && pgcId) return `/pgc/${pgcId}`;
   if (item.business === 'article' && item.subjectId) return `https://www.bilibili.com/read/cv${item.subjectId}`;
   if (item.business === 'dynamic' && item.subjectId) return `/dynamics/${item.subjectId}`;
   if (item.business === 'live' && item.subjectId) return `live:${item.subjectId}`;
@@ -387,12 +395,7 @@ export default function NotificationsScreen() {
         }
         ListEmptyComponent={
           loading ? null : (
-            <View style={styles.emptyWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="mail-open-outline" size={38} color={colors.textTertiary} />
-              </View>
-              <Text style={[T.headline, styles.emptyTitle, { color: colors.text }]}>暂无消息</Text>
-            </View>
+            <EmptyState icon="mail-open-outline" title="暂无消息" />
           )
         }
         renderItem={renderRow}
@@ -421,8 +424,5 @@ const styles = StyleSheet.create({
   unreadDot: { width: 7, height: 7, borderRadius: 3.5 },
   time: {},
   desc: {},
-  emptyWrap: { alignItems: 'center', justifyContent: 'center', paddingTop: 100, paddingHorizontal: 40, gap: 8 },
-  emptyIconBox: { width: 84, height: 84, borderRadius: 42, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
-  emptyTitle: { fontWeight: '600' },
   skeletonCard: { position: 'absolute', top: 70, left: 14, right: 14, borderRadius: RADII.lg, paddingHorizontal: 16, paddingTop: 4, ...continuous },
 });

@@ -272,9 +272,6 @@ export default function MemberVideoWebScreen() {
         }
         estimatedItemSize={102}
         overrideItemLayout={rowLayout}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
       />

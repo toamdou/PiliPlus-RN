@@ -619,13 +619,21 @@ final class PiliPlayerSession: NSObject {
     private func updatePlayingState(for player: AVPlayer) {
         let nextPlaying = player.timeControlStatus == .playing
         updateKeepAwake(nextPlaying)
-        guard nextPlaying != isPlaying else {
-            return
+        if nextPlaying != isPlaying {
+            let oldPlaying = isPlaying
+            isPlaying = nextPlaying
+            eventHandler?("playingChange", ["isPlaying": nextPlaying, "oldIsPlaying": oldPlaying])
+            updateTimeObserverForPlaybackState()
         }
-        let oldPlaying = isPlaying
-        isPlaying = nextPlaying
-        eventHandler?("playingChange", ["isPlaying": nextPlaying, "oldIsPlaying": oldPlaying])
-        updateTimeObserverForPlaybackState()
+
+        // 04-P0/3.4 buffering 状态：timeControlStatus == .waitingToPlayAtSpecifiedRate
+        // 表示正在缓冲（卡顿），需要把缓冲中状态透出到 JS 供全屏/详情页显示 spinner。
+        // 每次 waitingToPlay 都发（保证重复卡顿可感知）；.readyToPlay/.playing 会回到 false。
+        if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+            eventHandler?("buffering", ["isBuffering": true])
+        } else {
+            eventHandler?("buffering", ["isBuffering": false])
+        }
     }
 
     private func updateTimeObserverForPlaybackState() {

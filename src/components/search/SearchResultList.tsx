@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text as RNText, View } from 'react-native';
 import { Host, ProgressView } from '@expo/ui/swift-ui';
 import { FlashList, FlashListRef } from '@shopify/flash-list';
@@ -10,6 +10,7 @@ import { Press } from '@/components/motion';
 import { RADII, continuous, shadow } from '@/theme/tokens';
 import { formatCount } from '@/utils/format';
 import { biliCover } from '@/utils/image-url';
+import EmptyState from '@/components/EmptyState';
 
 export interface SearchResult {
   bvid: string;
@@ -244,12 +245,13 @@ export function SearchResultList({
       <FlashList
         ref={listRef}
         data={displayResults}
-        keyExtractor={(item, idx) => (
+        keyExtractor={(item) => (
           item.bvid ||
           (item.seasonId ? `pgc-${item.seasonId}` : '') ||
           (item.mediaId ? `media-${item.mediaId}` : '') ||
           (item.roomid ? `live-${item.roomid}` : '') ||
-          `${getItemType(item)}-${idx}`
+          (item.mid ? `user-${item.mid}` : '') ||
+          `${getItemType(item)}`
         )}
         style={styles.resultList}
         contentInsetAdjustmentBehavior="never"
@@ -258,9 +260,6 @@ export function SearchResultList({
         onScroll={(e) => { scrollOffsetRef.current = e.nativeEvent.contentOffset.y; }}
         scrollEventThrottle={16}
         estimatedItemSize={120}
-        windowSize={9}
-        initialNumToRender={10}
-        maxToRenderPerBatch={12}
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         getItemType={getItemType}
@@ -272,13 +271,12 @@ export function SearchResultList({
               <Host matchContents><ProgressView /></Host>
             </View>
           ) : (
-            <View style={styles.loadingWrap}>
-              <View style={[styles.emptyIconBox, { backgroundColor: colors.fill2 }]}>
-                <Ionicons name="search-outline" size={36} color={colors.textTertiary} />
-              </View>
-              <RNText style={[T.subhead, { color: colors.textSecondary, marginTop: 14, fontWeight: '500' }]}>无搜索结果</RNText>
-              <RNText style={[T.footnote, { color: colors.textTertiary, marginTop: 4 }]}>换个关键词试试</RNText>
-            </View>
+            <EmptyState
+              icon="search-outline"
+              title="无搜索结果"
+              subtitle="换个关键词试试"
+              style={styles.loadingWrap}
+            />
           )
         }
         ListFooterComponent={
@@ -298,7 +296,6 @@ const styles = StyleSheet.create({
   resultList: { flex: 1 },
   resultListContent: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 40, gap: 16 },
   loadingWrap: { height: 240, justifyContent: 'center', alignItems: 'center' },
-  emptyIconBox: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center' },
   resultCard: {
     flexDirection: 'row',
     borderRadius: RADII.md,
@@ -334,4 +331,229 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   liveBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '600' },
+  /* ===== 综合 Tab（SearchAllResultList） ===== */
+  allListContent: { paddingHorizontal: 14, paddingTop: 6, paddingBottom: 100 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 10,
+  },
+  sectionTitle: { fontWeight: '700', letterSpacing: -0.2 },
+  sectionCount: { borderRadius: RADII.xs, paddingHorizontal: 6, paddingVertical: 2, overflow: 'hidden' },
+  sectionCountText: { fontSize: 11, fontWeight: '600' },
+  sectionMore: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 2 },
+  allVideoCard: { marginBottom: 12 },
+  allRowCard: { marginBottom: 10 },
+  allEnd: { alignItems: 'center', paddingVertical: 16 },
 });
+
+/* ================= 综合搜索（混合结果分组列表，批次5 搜索综合 Tab） ================= */
+
+/** 综合搜索各分组解析结果（SearchResult 复用现有统一卡字段）。 */
+export interface MixedSearchData {
+  video: SearchResult[];
+  user: SearchResult[];
+  /** 番剧（media_bangumi）+ 影视（media_ft）合并分组 */
+  pgc: SearchResult[];
+  live: SearchResult[];
+  article: SearchResult[];
+  numResults?: number;
+}
+
+export function emptyMixedSearch(): MixedSearchData {
+  return { video: [], user: [], pgc: [], live: [], article: [] };
+}
+
+export function isEmptyMixed(data: MixedSearchData): boolean {
+  return (
+    data.video.length === 0 &&
+    data.user.length === 0 &&
+    data.pgc.length === 0 &&
+    data.live.length === 0 &&
+    data.article.length === 0
+  );
+}
+
+type AllItem =
+  | { kind: 'header'; title: string; count: number; categoryIdx: number }
+  | { kind: 'video'; item: SearchResult }
+  | { kind: 'user'; item: SearchResult }
+  | { kind: 'pgc'; item: SearchResult }
+  | { kind: 'live'; item: SearchResult }
+  | { kind: 'article'; item: SearchResult }
+  | { kind: 'empty' };
+
+function SectionHeader({
+  title,
+  count,
+  categoryIdx,
+  onJumpToCategory,
+  colors,
+  T,
+}: {
+  title: string;
+  count: number;
+  categoryIdx: number;
+  onJumpToCategory: (idx: number) => void;
+  colors: ReturnType<typeof useThemeColors>;
+  T: ReturnType<typeof useType>;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <RNText style={[T.subhead, styles.sectionTitle, { color: colors.text }]}>{title}</RNText>
+      <View style={[styles.sectionCount, { backgroundColor: colors.fill2 }]}>
+        <RNText style={[styles.sectionCountText, { color: colors.textSecondary }]}>{count}</RNText>
+      </View>
+      <Press haptic scaleTo={0.94} onPress={() => onJumpToCategory(categoryIdx)} style={styles.sectionMore}>
+        <RNText style={[T.footnote, { color: colors.accent, fontWeight: '600' }]}>查看全部</RNText>
+        <Ionicons name="chevron-forward" size={12} color={colors.accent} />
+      </Press>
+    </View>
+  );
+}
+
+/** 综合 Tab 结果列表：视频大卡 + 用户/番剧/直播/专栏分组，每个分组可"查看全部"跳对应 Tab。 */
+export function SearchAllResultList({
+  data,
+  searching,
+  onEndReached,
+  onOpenUser,
+  onOpenMedia,
+  onJumpToCategory,
+}: {
+  data: MixedSearchData;
+  searching: boolean;
+  onEndReached: () => void;
+  onOpenUser: (item: SearchResult) => void;
+  onOpenMedia: (item: SearchResult) => void;
+  onJumpToCategory: (idx: number) => void;
+}) {
+  const colors = useThemeColors();
+  const T = useType();
+
+  /* 展平为分组行：视频最多 5 条大卡，其余分组最多 3 条行卡 */
+  const items = useMemo<AllItem[]>(() => {
+    const out: AllItem[] = [];
+    const isEmpty = isEmptyMixed(data);
+    if (isEmpty) {
+      /* 搜索中且暂无数据 → 空数组（配合 ListEmptyComponent 显示加载指示） */
+      if (searching) return [];
+      out.push({ kind: 'empty' });
+      return out;
+    }
+    if (data.video.length > 0) {
+      out.push({ kind: 'header', title: '视频', count: data.video.length, categoryIdx: 1 });
+      for (const item of data.video.slice(0, 5)) out.push({ kind: 'video', item });
+    }
+    if (data.user.length > 0) {
+      out.push({ kind: 'header', title: '用户', count: data.user.length, categoryIdx: 5 });
+      for (const item of data.user.slice(0, 3)) out.push({ kind: 'user', item });
+    }
+    if (data.pgc.length > 0) {
+      out.push({ kind: 'header', title: '番剧/影视', count: data.pgc.length, categoryIdx: 2 });
+      for (const item of data.pgc.slice(0, 3)) out.push({ kind: 'pgc', item });
+    }
+    if (data.live.length > 0) {
+      out.push({ kind: 'header', title: '直播', count: data.live.length, categoryIdx: 4 });
+      for (const item of data.live.slice(0, 3)) out.push({ kind: 'live', item });
+    }
+    if (data.article.length > 0) {
+      out.push({ kind: 'header', title: '专栏', count: data.article.length, categoryIdx: 6 });
+      for (const item of data.article.slice(0, 3)) out.push({ kind: 'article', item });
+    }
+    return out;
+  }, [data, searching]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: AllItem }) => {
+      switch (item.kind) {
+        case 'header':
+          return <SectionHeader title={item.title} count={item.count} categoryIdx={item.categoryIdx} onJumpToCategory={onJumpToCategory} colors={colors} T={T} />;
+        case 'video':
+          return (
+            <View style={styles.allVideoCard}>
+              <MediaResultRow item={item.item} index={0} colors={colors} T={T} onPress={onOpenMedia} />
+            </View>
+          );
+        case 'user':
+          return (
+            <View style={styles.allRowCard}>
+              <UserResultRow item={item.item} index={0} colors={colors} T={T} onPress={onOpenUser} />
+            </View>
+          );
+        case 'pgc':
+        case 'live':
+        case 'article':
+          return (
+            <View style={styles.allRowCard}>
+              <MediaResultRow item={item.item} index={0} colors={colors} T={T} onPress={onOpenMedia} />
+            </View>
+          );
+        case 'empty':
+          return (
+            <EmptyState
+              icon="search-outline"
+              title="无搜索结果"
+              subtitle="换个关键词试试"
+              style={{ paddingTop: 120 }}
+            />
+          );
+        default:
+          return null;
+      }
+    },
+    [colors, T, onOpenUser, onOpenMedia, onJumpToCategory],
+  );
+
+  const getItemType = useCallback(
+    (item: AllItem) => (item.kind === 'header' ? 'header' : item.kind === 'video' ? 'video' : item.kind === 'user' ? 'user' : 'media'),
+    [],
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+      <FlashList
+        data={items}
+        keyExtractor={(item, index) =>
+          item.kind === 'header' ? `h-${item.title}` : item.kind === 'empty' ? 'empty' : `${item.kind}-${item.item.bvid || item.item.mid || item.item.seasonId || item.item.roomid || item.item.articleId || index}`
+        }
+        style={styles.resultList}
+        contentInsetAdjustmentBehavior="never"
+        contentContainerStyle={styles.allListContent}
+        showsVerticalScrollIndicator={false}
+        estimatedItemSize={110}
+        drawDistance={250}
+        overrideProps={{ initialDrawBatchSize: 8 }}
+        getItemType={getItemType}
+        onEndReached={onEndReached}
+        onEndReachedThreshold={0.4}
+        ListHeaderComponent={
+          searching ? null : (
+            <View style={styles.allEnd}>
+              <RNText style={[T.caption2, { color: colors.textTertiary }]}>
+                共 {data.numResults ?? '-'} 条结果
+              </RNText>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          searching ? (
+            <View style={{ marginVertical: 16, alignItems: 'center' }}>
+              <Host matchContents><ProgressView /></Host>
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          searching ? (
+            <View style={styles.loadingWrap}>
+              <Host matchContents><ProgressView /></Host>
+            </View>
+          ) : null
+        }
+        renderItem={renderItem}
+      />
+    </View>
+  );
+}

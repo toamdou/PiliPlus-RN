@@ -4,7 +4,7 @@
  * 分页/排序逻辑保留；楼中楼行不再只读：支持点赞/踩、回复、图片、删除。
  */
 import { useState, useRef, useCallback, useEffect, memo } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, TextInput, ActionSheetIOS, Alert } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, TextInput, ActionSheetIOS, Alert, Keyboard } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,9 +12,13 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { Host, BottomSheet, Group, RNHostView } from '@expo/ui/swift-ui';
+import { presentationDetents, presentationDragIndicator } from '@expo/ui/swift-ui/modifiers';
 import { useThemeColors, ACCENT } from '@/components/SwiftUIHost';
 import { Press } from '@/components/motion';
 import { useType } from '@/components/type-scale';
+import { RADII, continuous } from '@/theme/tokens';
+import EmptyState from '@/components/EmptyState';
 import { formatTime, formatCount } from '@/utils/format';
 import { replyApi } from '@/api/reply';
 import { dynamicsApi } from '@/api/dynamics';
@@ -23,8 +27,7 @@ import { useAuthStore } from '@/stores/auth';
 import { showToast } from '@/utils/toast';
 import { feedBackSuccess, feedBackSelection } from '@/utils/feedback';
 import { biliCover } from '@/utils/image-url';
-import { NativeBottomSheet } from '@/components/NativeBottomSheet';
-import { VoteCard, type ReplyItem } from '@/components/CommentSection';
+import { ActionThumb, VoteCard, type ReplyItem } from '@/components/CommentSection';
 
 interface Props {
   visible: boolean;
@@ -71,6 +74,7 @@ function applyPatch(reply: ReplyItem, patches: Record<number, ReplyPatch>): Repl
 export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialReplies, onClose, upMid }: Props) {
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
+  const T = useType();
   const myMid = useAuthStore((s) => s.userInfo?.mid);
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
 
@@ -84,6 +88,9 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
   const [replyText, setReplyText] = useState('');
   const [replyImage, setReplyImage] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // V6：SwiftUI BottomSheet 内无自动键盘规避，medium detent 下输入框会被键盘盖住。
+  // 键盘弹出时把可用 detent 收敛为 large 并显式选中，键盘收起再恢复 [medium, large]。
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const pageRef = useRef(page);
   const loadingRef = useRef(false);
   const refreshingRef = useRef(true);
@@ -97,6 +104,21 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
   useEffect(() => () => {
     cancelTokenRef.current?.abort();
     uploadCancelRef.current?.abort();
+  }, []);
+
+  // V6：监听键盘显隐，驱动 BottomSheet detent 切换
+  useEffect(() => {
+    const show = () => setKeyboardVisible(true);
+    const hide = () => setKeyboardVisible(false);
+    const subs = [
+      Keyboard.addListener('keyboardWillShow', show),
+      Keyboard.addListener('keyboardDidShow', show),
+      Keyboard.addListener('keyboardWillHide', hide),
+      Keyboard.addListener('keyboardDidHide', hide),
+    ];
+    return () => {
+      subs.forEach((s) => s.remove());
+    };
   }, []);
 
   const isDone = useCallback((arr: ReplyItem[], pg: PageInfo | undefined, loaded: number, count: number): boolean => {
@@ -412,18 +434,18 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
   const sheetContent = (
     <>
       <View style={[styles.header, { borderBottomColor: colors.separator }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>{`全部回复 (${formatCount(total)})`}</Text>
+        <Text style={[T.headline, styles.headerTitle, { color: colors.text }]}>{`全部回复 (${formatCount(total)})`}</Text>
         <Press haptic scaleTo={0.85} onPress={onClose} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="关闭">
           <Ionicons name="close" size={20} color={colors.textSecondary} />
         </Press>
       </View>
       <View style={[styles.sortBar, { borderBottomColor: colors.separator }]}>
-        <Text style={[styles.sortCount, { color: colors.textSecondary }]}>
+        <Text style={[T.footnote, styles.sortCount, { color: colors.textSecondary }]}>
           {total > 0 ? `相关回复共${formatCount(total)}条` : ''}
         </Text>
         <Press haptic scaleTo={0.9} onPress={toggleSort} style={styles.sortBtn} accessibilityRole="button" accessibilityLabel="切换排序">
           <Ionicons name="swap-vertical" size={14} color={colors.textSecondary} />
-          <Text style={[styles.sortLabel, { color: colors.textSecondary }]}>
+          <Text style={[T.footnote, styles.sortLabel, { color: colors.textSecondary }]}>
             {sort === 'time' ? '按时间' : '按热度'}
           </Text>
         </Press>
@@ -434,6 +456,8 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
         keyExtractor={keyExtractor}
         contentContainerStyle={[styles.listContent, { flexGrow: 1 }]}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="interactive"
         onEndReached={loadNext}
         onEndReachedThreshold={0.3}
         estimatedItemSize={160}
@@ -443,9 +467,8 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
         drawDistance={250}
         overrideProps={{ initialDrawBatchSize: 10 }}
         ListEmptyComponent={refreshing ? null : (
-          <View style={styles.empty}>
-            <Text style={[styles.footerText, { color: colors.textTertiary }]}>暂无回复</Text>
-          </View>
+          /* #39：空态统一走共享 EmptyState */
+          <EmptyState icon="chatbox-ellipses-outline" title="暂无回复" subtitle="来抢沙发，回复该楼中楼" />
         )}
         ListFooterComponent={
           refreshing ? (
@@ -453,10 +476,10 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
           ) : loading ? (
             <Animated.View entering={FadeIn.duration(200)} style={styles.footer}>
               <ActivityIndicator size="small" color={colors.textTertiary} />
-              <Text style={[styles.footerText, { color: colors.textTertiary }]}>正在加载更多回复…</Text>
+              <Text style={[T.caption1, styles.footerText, { color: colors.textTertiary }]}>正在加载更多回复…</Text>
             </Animated.View>
           ) : !page.hasMore && list.length > 0 ? (
-            <Text style={[styles.footerText, styles.footerEnd, { color: colors.textTertiary }]}>没有更多回复了</Text>
+            <Text style={[T.caption1, styles.footerText, styles.footerEnd, { color: colors.textTertiary }]}>没有更多回复了</Text>
           ) : null
         }
         renderItem={renderItem}
@@ -469,7 +492,7 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
               onChangeText={setReplyText}
               placeholder="回复该楼中楼…"
               placeholderTextColor={colors.textTertiary}
-              style={[styles.composerInput, { color: colors.text }]}
+              style={[T.subhead, styles.composerInput, { color: colors.text }]}
               multiline
               maxLength={500}
             />
@@ -492,9 +515,21 @@ export function ReplyDetailSheet({ visible, oid, type, root, rcount, initialRepl
   );
 
   return (
-    <NativeBottomSheet visible={visible} onClose={onClose} detents={['medium', 'large']} dragIndicator="visible" background={colors.bg}>
-      <View style={{ flex: 1 }}>{sheetContent}</View>
-    </NativeBottomSheet>
+    <Host>
+      <BottomSheet isPresented={visible} onIsPresentedChange={(v) => { if (!v) onClose(); }}>
+        <Group modifiers={[
+          // V6：键盘弹出时收敛为 large detent 并显式选中，避免 medium 下输入框被键盘盖住
+          presentationDetents(keyboardVisible ? (['large'] as any) : (['medium', 'large'] as any), keyboardVisible ? { selection: 'large' as any } : undefined),
+          presentationDragIndicator('visible'),
+        ]}>
+          <RNHostView>
+            <View style={[styles.sheetFill, { backgroundColor: colors.bg }]}>
+              <View style={{ flex: 1 }}>{sheetContent}</View>
+            </View>
+          </RNHostView>
+        </Group>
+      </BottomSheet>
+    </Host>
   );
 }
 
@@ -525,24 +560,34 @@ const ReplyRow = memo(function ReplyRow({
         contentFit="cover"
       />
       <View style={styles.body}>
-        <Text style={[styles.name, { color: colors.textSecondary }]} numberOfLines={1}>{item.member.uname}</Text>
-        <Text style={[styles.msg, { color: colors.text }]}>{item.content.message}</Text>
+        <Text style={[T.caption1, styles.name, { color: colors.textSecondary, fontWeight: '500' }]} numberOfLines={1}>{item.member.uname}</Text>
+        <Text style={[T.footnote, styles.msg, { color: colors.text }]}>{item.content.message}</Text>
             {item.content.pictures && item.content.pictures.length > 0 && (
           <View style={styles.picRow}>
             {item.content.pictures.slice(0, 3).map((p, i) => (
-              <ExpoImage key={i} source={{ uri: biliCover(p.img_src, 160, 160) }} recyclingKey={p.img_src} cachePolicy="memory-disk" style={styles.pic} contentFit="cover" />
+              <ExpoImage key={i} source={{ uri: biliCover(p.img_src, 160, 160) }} recyclingKey={p.img_src} cachePolicy="memory-disk" style={[styles.pic, { backgroundColor: colors.fill2 }]} contentFit="cover" />
             ))}
           </View>
         )}
         <View style={styles.meta}>
-          <Text style={[styles.time, { color: colors.textTertiary }]}>{formatTime(item.ctime)}</Text>
-          <Press haptic scaleTo={0.9} onPress={() => onLike(item)} style={styles.like}>
-            <Ionicons name={item.action === 1 ? 'thumbs-up' : 'thumbs-up-outline'} size={12} color={item.action === 1 ? ACCENT : colors.textTertiary} />
-            <Text style={[styles.time, { color: item.action === 1 ? ACCENT : colors.textTertiary }]}>{formatCount(item.like)}</Text>
-          </Press>
-          <Press haptic scaleTo={0.9} onPress={() => onHate(item)} style={styles.like}>
-            <Ionicons name={item.action === 2 ? 'thumbs-down' : 'thumbs-down-outline'} size={12} color={item.action === 2 ? ACCENT : colors.textTertiary} />
-          </Press>
+          <Text style={[T.caption1, styles.time, { color: colors.textTertiary }]}>{formatTime(item.ctime)}</Text>
+          <ActionThumb
+            active={item.action === 1}
+            size={12}
+            colors={colors}
+            iconActive="thumbs-up"
+            iconIdle="thumbs-up-outline"
+            label={formatCount(item.like)}
+            onPress={() => onLike(item)}
+          />
+          <ActionThumb
+            active={item.action === 2}
+            size={12}
+            colors={colors}
+            iconActive="thumbs-down"
+            iconIdle="thumbs-down-outline"
+            onPress={() => onHate(item)}
+          />
           <Press haptic scaleTo={0.9} onPress={() => onManage(item)} style={styles.like}>
             <Ionicons name="ellipsis-horizontal" size={13} color={colors.textTertiary} />
           </Press>
@@ -554,6 +599,7 @@ const ReplyRow = memo(function ReplyRow({
 });
 
 const styles = StyleSheet.create({
+  sheetFill: { flexGrow: 1, height: 0 },
   sheetList: { flex: 1 },
   header: {
     flexDirection: 'row',
@@ -563,8 +609,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: { fontSize: 16, fontWeight: '600' },
-  closeBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: {},
+  closeBtn: { width: 32, height: 32, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center' },
   sortBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -573,28 +619,27 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  sortCount: { fontSize: 13 },
+  sortCount: {},
   sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4 },
-  sortLabel: { fontSize: 13, fontWeight: '500' },
+  sortLabel: { fontWeight: '500' },
   listContent: { paddingHorizontal: 16, paddingBottom: 12 },
   row: { flexDirection: 'row', gap: 10, paddingVertical: 12 },
-  avatar: { width: 32, height: 32, borderRadius: 16 },
+  avatar: { width: 32, height: 32, borderRadius: RADII.circle },
   body: { flex: 1, gap: 3 },
-  name: { fontSize: 12, fontWeight: '500' },
-  msg: { fontSize: 13, lineHeight: 19 },
+  name: {},
+  msg: {},
   picRow: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  pic: { width: 64, height: 64, borderRadius: 8 },
+  pic: { width: 64, height: 64, borderRadius: RADII.thumb, ...continuous },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 2 },
-  time: { fontSize: 12 },
+  time: {},
   like: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16 },
-  footerText: { fontSize: 12 },
+  footerText: {},
   footerEnd: { textAlign: 'center', paddingVertical: 16 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   composerBar: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 12, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
-  composerField: { flex: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, maxHeight: 92 },
-  composerInput: { fontSize: 14, lineHeight: 19, maxHeight: 84 },
-  composerPic: { width: 56, height: 56, borderRadius: 8, marginTop: 4 },
-  composerIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
-  composerSend: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  composerField: { flex: 1, borderRadius: RADII.md, paddingHorizontal: 12, paddingVertical: 4, maxHeight: 92, ...continuous },
+  composerInput: { maxHeight: 84 },
+  composerPic: { width: 56, height: 56, borderRadius: RADII.thumb, marginTop: 4, ...continuous },
+  composerIcon: { width: 34, height: 34, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  composerSend: { width: 34, height: 34, borderRadius: RADII.circle, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
 });
